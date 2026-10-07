@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#0B0D10" android:fillViewport="true">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+    <TextView android:id="@+id/title" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="GOLDTRADER PRO" android:textColor="#D6B45A" android:textSize="22sp" android:textStyle="bold" android:gravity="right"/>
+    <TextView android:id="@+id/health" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="● CONNECTING" android:textColor="#A9B0B8" android:textSize="13sp" android:gravity="right" android:paddingTop="4dp"/>
+    <TextView android:id="@+id/price" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="NO DATA" android:textColor="#F1F3F5" android:textSize="34sp" android:textStyle="bold" android:gravity="right" android:paddingTop="24dp"/>
+    <TextView android:id="@+id/signal" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="WAIT — منتظر داده معتبر" android:textColor="#A9B0B8" android:textSize="18sp" android:gravity="right" android:paddingTop="12dp"/>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="18dp">
+      <TextView android:id="@+id/entry" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="ENTRY\n—" android:textColor="#F1F3F5" android:textSize="15sp" android:gravity="center" android:padding="12dp"/>
+      <TextView android:id="@+id/sl" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="SL\n—" android:textColor="#F1F3F5" android:textSize="15sp" android:gravity="center" android:padding="12dp"/>
+      <TextView android:id="@+id/tp" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="TP1\n—" android:textColor="#F1F3F5" android:textSize="15sp" android:gravity="center" android:padding="12dp"/>
+    </LinearLayout>
+    <TextView android:id="@+id/reasons" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="دلایل سیگنال\nNO DATA" android:textColor="#A9B0B8" android:textSize="14sp" android:gravity="right" android:paddingTop="24dp"/>
+    <TextView android:id="@+id/protection" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Smart Protection: OFF" android:textColor="#D6B45A" android:textSize="14sp" android:gravity="right" android:paddingTop="22dp"/>
+    <TextView android:id="@+id/server" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Server: http://SERVER_IP:8765" android:textColor="#6F7780" android:textSize="12sp" android:gravity="right" android:paddingTop="30dp"/>
+</LinearLayout>
+</ScrollView>
