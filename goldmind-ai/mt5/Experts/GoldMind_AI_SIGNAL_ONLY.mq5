@@ -182,7 +182,7 @@ void PrintSignal(string body)
       Print("SIGNAL: WAIT | Reason: ",reason);
    else
    {
-      Print("SIGNAL: ",StringToUpper(type));
+      string signal_type=type;\n      StringToUpper(signal_type);\n      Print("SIGNAL: ",signal_type);
       Print("Entry: ",DoubleToString(entry,(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS)),
             " | SL: ",DoubleToString(sl,(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS)),
             " | TP: ",DoubleToString(tp,(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS)));
