@@ -65,22 +65,33 @@ public class MainActivity extends Activity {
                 socket.setBroadcast(true);
                 socket.setSoTimeout(1200);
                 byte[] data=DISCOVERY_MESSAGE.getBytes(StandardCharsets.UTF_8);
-                DatagramPacket request=new DatagramPacket(
-                    data, data.length,
-                    InetAddress.getByName("255.255.255.255"), DISCOVERY_PORT);
-                socket.send(request);
-
-                byte[] buffer=new byte[256];
-                DatagramPacket response=new DatagramPacket(buffer, buffer.length);
-                socket.receive(response);
-                String answer=new String(response.getData(), response.getOffset(), response.getLength(), StandardCharsets.UTF_8).trim();
-                if(answer.startsWith("GOLDTRADER_SERVER|")){
-                    String[] p=answer.split("\\|");
-                    if(p.length>=2){
-                        String host=p[1];
-                        int port=p.length>=3 ? Integer.parseInt(p[2]) : 8000;
-                        base="http://"+host+":"+port;
+                // Try global broadcast first, then the directed broadcast of
+                // every IPv4 interface. This is more reliable on home routers.
+                sendDiscovery(socket, InetAddress.getByName("255.255.255.255"), data);
+                for(NetworkInterface ni : java.util.Collections.list(NetworkInterface.getNetworkInterfaces())){
+                    if(!ni.isUp() || ni.isLoopback()) continue;
+                    for(java.net.InterfaceAddress ia : ni.getInterfaceAddresses()){
+                        java.net.InetAddress bc=ia.getBroadcast();
+                        if(bc!=null) sendDiscovery(socket, bc, data);
                     }
+                }
+
+                long deadline=System.currentTimeMillis()+1800;
+                while(base==null && System.currentTimeMillis()<deadline){
+                    try{
+                        byte[] buffer=new byte[256];
+                        DatagramPacket response=new DatagramPacket(buffer, buffer.length);
+                        socket.receive(response);
+                        String answer=new String(response.getData(), response.getOffset(), response.getLength(), StandardCharsets.UTF_8).trim();
+                        if(answer.startsWith("GOLDTRADER_SERVER|")){
+                            String[] p=answer.split("\\|");
+                            if(p.length>=2){
+                                String host=p[1];
+                                int port=p.length>=3 ? Integer.parseInt(p[2]) : 8000;
+                                base="http://"+host+":"+port;
+                            }
+                        }
+                    }catch(java.net.SocketTimeoutException ignored){ break; }
                 }
             } catch(Exception ignored) {
                 // Some Xiaomi/MIUI routers block LAN broadcast. Fall back to a direct
@@ -102,6 +113,13 @@ public class MainActivity extends Activity {
                 }
             });
         }).start();
+    }
+
+    private void sendDiscovery(DatagramSocket socket, InetAddress address, byte[] data){
+        try{
+            DatagramPacket packet=new DatagramPacket(data,data.length,address,DISCOVERY_PORT);
+            socket.send(packet);
+        }catch(Exception ignored){}
     }
 
     private String scanLocalSubnet(){
