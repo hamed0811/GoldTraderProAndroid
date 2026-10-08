@@ -436,8 +436,9 @@ def build_system_prompt(req: SignalRequest, atr_value: float) -> str:
     session = get_session_info(now_utc, req.symbol)
     inst = session["instrument"]
 
-    return f"""You are a professional {inst['name']} trading analyst operating from Malaysia (UTC+8).
-You specialize in {inst['specialty']}. Your goal is to find the best available trading opportunity, even if conditions are not absolutely perfect, provided they meet minimum viability.
+    return f"""You are a professional {inst['name']} SIGNAL-ONLY trading analyst. You provide analysis for a human trader.
+You specialize in {inst['specialty']}. NEVER execute, place, modify, cancel, or manage any order. The returned order object is ONLY a hypothetical trade plan for display to the human trader.
+The goal is to find a high-quality short-horizon opportunity, preferably suitable for the next 10 minutes, but return WAIT when the data is stale, contradictory, or insufficient.
 
 ═══ INSTRUMENT ═══
 - Symbol: {req.symbol}
@@ -472,11 +473,12 @@ Before making your decision, mentally perform these analysis steps:
 
 4. STRATEGY DECISION:
    Based on the above, choose the best approach:
-   - BREAKOUT: Place a pending order beyond a key level to catch momentum. This should be your primary action if there's any reasonable technical setup.
-   - VETO: Only veto if the market is extremely choppy and completely untradable. Avoid vetoing just because conditions aren't perfectly aligned.
+   - BREAKOUT: Propose a hypothetical pending-entry level beyond a key level for the human trader to consider.
+   - WAIT: Prefer WAIT when evidence is weak, contradictory, stale, or the setup is not suitable for the next 10 minutes.
+   - Never force a trade. Signal quality is more important than signal frequency.
 
-═══ ORDER RULES — follow these exactly ═══
-1. Only propose pending orders (buy_stop or sell_stop), never market orders.
+═══ SIGNAL PLAN RULES — follow these exactly ═══
+1. The order object is informational only. It is NEVER executed by this system.
 2. buy_stop: entry ABOVE Ask + buffer (at least Ask + 1×ATR)
    sell_stop: entry BELOW Bid - buffer (at least Bid - 1×ATR)
 3. SL must be on the opposite side of entry:
@@ -487,10 +489,10 @@ Before making your decision, mentally perform these analysis steps:
    - Place TP at the level that makes the most sense technically (key S/R, Fib extensions, ATR targets, etc.)
    - You may use a HIGHER or LOWER R:R than {req.constraints.min_rr} if the chart structure supports it
    - The goal is the best risk-adjusted trade, not a fixed R:R ratio
-5. expiry_minutes = {req.constraints.expiry_minutes}.
+5. expiry_minutes should normally be {req.constraints.expiry_minutes} minutes because the target is a short-horizon signal.
 6. Provide a short comment (max 30 chars) describing the setup.
 7. If spread ({req.spread_points} pts) > max allowed ({req.constraints.max_spread_points} pts),
-   OR if no clear setup exists, set order.type="none", veto=true,
+   OR if no clear short-horizon setup exists, set order.type="none", veto=true,
    veto_reason explaining why.
 8. All prices must be rounded to {req.digits} decimal places.
 9. symbol = "{req.symbol}". timestamp_utc = current UTC time in ISO-8601.
@@ -585,13 +587,25 @@ async def generate_signal(req: SignalRequest):
     # 1. Compute ATR if not provided
     atr_value = req.atr if req.atr is not None else compute_atr(req.candles)
 
-    # 2. Quick spread veto (server-side too, belt-and-suspenders)
+    # 2. Hard symbol/data gates. This build is intentionally XAUUSD signal-only.
+    sym = req.symbol.upper().replace(".", "").replace("_", "").replace("-", "")
+    if "XAUUSD" not in sym and "GOLD" not in sym:
+        logger.warning(f"   🚫 VETO: unsupported symbol {req.symbol}; XAUUSD/GOLD only")
+        return veto_response(req.symbol, "unsupported_symbol")
+    if not req.candles or sum(len(v) for v in req.candles.values()) < 30:
+        logger.warning("   🚫 VETO: insufficient market data")
+        return veto_response(req.symbol, "insufficient_data")
+    if atr_value <= 0:
+        logger.warning("   🚫 VETO: ATR unavailable")
+        return veto_response(req.symbol, "atr_unavailable")
+
+    # 3. Quick spread veto (server-side too, belt-and-suspenders)
     if req.spread_points > req.constraints.max_spread_points:
         logger.warning(f"   🚫 VETO: Spread {req.spread_points} > max {req.constraints.max_spread_points}")
         logger.info("─" * 60)
         return veto_response(req.symbol, f"spread {req.spread_points} > max {req.constraints.max_spread_points}")
 
-    # 3. Call OpenAI with Structured Outputs (with fallback)
+    # 4. Call OpenAI with Structured Outputs (with fallback)
     client = AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=60.0)
     models_to_try = [OPENAI_MODEL]
     if FALLBACK_MODEL and FALLBACK_MODEL != OPENAI_MODEL:
@@ -643,6 +657,24 @@ async def generate_signal(req: SignalRequest):
 
             # --- FIX Issue 3: Override timestamp with actual server time ---
             signal.timestamp_utc = datetime.now(timezone.utc).isoformat()
+
+            # Hard server-side validation: AI output can never become an executable action.
+            # Invalid geometry is converted to WAIT instead of being passed through.
+            if signal.order.type.value == "buy_stop":
+                valid = signal.order.entry > req.ask and signal.order.sl < signal.order.entry and signal.order.tp > signal.order.entry
+            elif signal.order.type.value == "sell_stop":
+                valid = signal.order.entry < req.bid and signal.order.sl > signal.order.entry and signal.order.tp < signal.order.entry
+            else:
+                valid = True
+            if signal.veto:
+                signal.order.type = OrderTypeEnum.none
+                signal.order.entry = 0.0
+                signal.order.sl = 0.0
+                signal.order.tp = 0.0
+                signal.order.expiry_minutes = 0
+            elif not valid:
+                logger.warning("   🚫 VETO: invalid signal geometry returned by model")
+                return veto_response(req.symbol, "invalid_signal_geometry")
 
             # --- Log R:R for info (no auto-correction, use AI's original TP) ---
             if not signal.veto and signal.order.type.value != "none":
