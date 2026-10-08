@@ -94,14 +94,17 @@ public class MainActivity extends Activity {
                     }catch(java.net.SocketTimeoutException ignored){ break; }
                 }
             } catch(Exception ignored) {
-                // Some Xiaomi/MIUI routers block LAN broadcast. Fall back to a direct
-                // /24 scan of the phone's current Wi-Fi subnet and verify /health.
-                if(base==null) base=scanLocalSubnet();
+                // Broadcast/discovery can be blocked by the router or Windows firewall.
+                // Always fall through to the direct subnet scan below.
             } finally {
                 if(socket!=null) socket.close();
                 discovering=false;
             }
             runOnUiThread(() -> {
+                // UDP discovery may time out without throwing. In that case,
+                // the old code skipped the subnet scan entirely. Always use the scan
+                // as the deterministic LAN fallback.
+                if(base==null) base=scanLocalSubnet();
                 if(base!=null){
                     server.setText("Server: "+base);
                     ui("● CONNECTED");
