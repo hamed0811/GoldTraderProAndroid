@@ -13,6 +13,8 @@ import sys
 import time
 import logging
 import traceback
+import socket
+import threading
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
@@ -84,6 +86,93 @@ app = FastAPI(title="GoldMind AI Signal Backend", version="1.0.0")
 
 
 # ---------------------------------------------------------------------------
+# Android/LAN mobile state + UDP discovery
+# ---------------------------------------------------------------------------
+MOBILE_DISCOVERY_PORT = 8766
+_latest_mobile_state = {
+    "price": "",
+    "symbol": "XAUUSD",
+    "signal": None,
+    "protection": {"mode": "OFF"},
+}
+_discovery_thread_started = False
+
+
+def _local_lan_ip() -> str:
+    """Return the Windows host's LAN IP without requiring internet access."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 80))
+        return probe.getsockname()[0]
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+    finally:
+        probe.close()
+
+
+def _publish_mobile_state(req: "SignalRequest", signal: "SignalResponse") -> None:
+    order = signal.order
+    order_type = getattr(order.type, "value", str(order.type))
+    if signal.veto or order_type == "none":
+        state, side = "WAIT", "—"
+    elif order_type == "buy_stop":
+        state, side = "BUY", "BUY"
+    elif order_type == "sell_stop":
+        state, side = "SELL", "SELL"
+    else:
+        state, side = "WAIT", "—"
+
+    _latest_mobile_state.clear()
+    _latest_mobile_state.update({
+        "price": str(req.bid),
+        "symbol": req.symbol,
+        "signal": {
+            "state": state,
+            "side": side,
+            "entry": order.entry,
+            "sl": order.sl,
+            "tp1": order.tp,
+            "confidence": signal.confidence,
+            "reasons": signal.veto_reason or order.comment,
+            "timestamp_utc": signal.timestamp_utc,
+            "veto": signal.veto,
+        },
+        "protection": {"mode": "OFF"},
+    })
+
+
+def _start_mobile_discovery() -> None:
+    global _discovery_thread_started
+    if _discovery_thread_started:
+        return
+    _discovery_thread_started = True
+
+    def worker():
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("0.0.0.0", MOBILE_DISCOVERY_PORT))
+            logger.info(f"  Mobile discovery: UDP 0.0.0.0:{MOBILE_DISCOVERY_PORT}")
+            while True:
+                data, addr = sock.recvfrom(512)
+                if data.strip() == b"GOLDTRADER_DISCOVER":
+                    host = _local_lan_ip()
+                    reply = f"GOLDTRADER_SERVER|{host}|8000".encode("utf-8")
+                    sock.sendto(reply, addr)
+                    logger.info(f"  Mobile discovery reply -> {addr[0]}:{addr[1]} ({host}:8000)")
+        except Exception as exc:
+            logger.error(f"  Mobile discovery stopped: {exc}")
+        finally:
+            sock.close()
+
+    threading.Thread(target=worker, name="goldtrader-mobile-discovery", daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
 # Middleware — log every incoming request and outgoing response
 # ---------------------------------------------------------------------------
 class RequestResponseLogger(BaseHTTPMiddleware):
@@ -135,6 +224,7 @@ async def startup_banner():
     logger.info("=" * 60)
     logger.info("  Waiting for signal requests from MT5 EA...")
     logger.info("=" * 60)
+    _start_mobile_discovery()
     logger.info("")
 
 # ---------------------------------------------------------------------------
@@ -560,6 +650,12 @@ def build_user_message(req: SignalRequest) -> str:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+@app.get("/api/state")
+async def mobile_state():
+    """Read-only state endpoint used by the Android signal client."""
+    return _latest_mobile_state
+
+
 @app.get("/health")
 async def health():
     logger.info("Health check requested")
@@ -696,6 +792,7 @@ async def generate_signal(req: SignalRequest):
                 logger.info(f"      Comment: {signal.order.comment}")
             logger.info("─" * 60)
 
+            _publish_mobile_state(req, signal)
             return signal
 
         except (openai.APITimeoutError, asyncio.TimeoutError) as e:
