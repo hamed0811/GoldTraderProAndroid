@@ -17,7 +17,7 @@ This repository integration is intentionally **signal-only**.
 
 # 🤖 GoldMind AI — MT5 Trading System
 
-> **What is this?** An AI-powered trading tool that uses OpenAI GPT to analyze gold (XAUUSD) price charts across multiple timeframes and automatically place trades in MetaTrader 5. It runs entirely on your own computer — just start the Python server and the EA in MT5.
+> **What is this?** An AI-powered trading tool that uses OpenAI GPT to analyze gold (XAUUSD) price charts across multiple timeframes and provide signal-only analysis in MetaTrader 5. No automatic orders are placed. It runs entirely on your own computer — just start the Python server and the EA in MT5.
 
 ---
 
@@ -843,3 +843,10 @@ To get permanent authorization on live accounts, register an account (Cent accou
   FastAPI · OpenAI Structured Outputs · MQL5<br><br>
   📬 For support: <a href="https://t.me/syariefazman">t.me/syariefazman</a>
 </p>
+
+
+---
+
+## Trading Knowledge Guide
+
+A Persian, independent synthesis of five classic trading and investing books is maintained in `TRADING_KNOWLEDGE_GUIDE_FA.md`. It is used as decision-making and risk-discipline guidance, not as a promise of profit.
