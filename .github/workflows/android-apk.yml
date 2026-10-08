@@ -37,7 +37,7 @@ jobs:
       - name: Upload release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GoldTraderPro-Android-v1.2.0-release
+          name: GoldTraderPro-Android-v1.2.1-release
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
@@ -46,6 +46,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v1.2.0"
+          TAG="v1.2.1"
           gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag || true
-          gh release create "$TAG"             "android/app/build/outputs/apk/release/app-release.apk"             --repo "${{ github.repository }}"             --title "GoldTrader Pro Android v1.2.0"             --notes "Installable Android release APK. Automatic order execution is disabled."             --target "${{ github.sha }}"
+          gh release create "$TAG"             "android/app/build/outputs/apk/release/app-release.apk"             --repo "${{ github.repository }}"             --title "GoldTrader Pro Android v1.2.1"             --notes "Installable Android release APK. Automatic order execution is disabled."             --target "${{ github.sha }}"
