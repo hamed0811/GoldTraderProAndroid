@@ -1,7 +1,7 @@
 plugins { id 'com.android.application' }
 
 android { namespace 'com.goldtraderpro'; compileSdk 35
-    defaultConfig { applicationId 'com.goldtraderpro'; minSdk 26; targetSdk 35; versionCode 121; versionName '1.2.0' }
+    defaultConfig { applicationId 'com.goldtraderpro'; minSdk 26; targetSdk 35; versionCode 122; versionName '1.2.0' }
     // CI release builds are signed with the standard Android debug key so the generated APK is directly installable.
     // Automatic trading/order execution remains disabled.
     buildTypes {
