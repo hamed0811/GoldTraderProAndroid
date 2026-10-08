@@ -104,7 +104,15 @@ try:
             while True:
                 data, addr = sock.recvfrom(256)
                 if data.strip() == b"GOLDTRADER_DISCOVER":
-                    reply = f"GOLDTRADER_SERVER|{addr[0]}|8000".encode("utf-8")
+                    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    try:
+                        probe.connect(("8.8.8.8", 80))
+                        local_ip = probe.getsockname()[0]
+                    except Exception:
+                        local_ip = socket.gethostbyname(socket.gethostname())
+                    finally:
+                        probe.close()
+                    reply = f"GOLDTRADER_SERVER|{local_ip}|8000".encode("utf-8")
                     sock.sendto(reply, addr)
         finally:
             sock.close()
