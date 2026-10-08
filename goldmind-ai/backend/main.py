@@ -26,6 +26,12 @@ import openai
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
+try:
+    from telegram_notifier import start as start_telegram, send_signal as send_telegram_signal
+except Exception:
+    start_telegram = lambda: False
+    send_telegram_signal = lambda signal: 0
+
 # ---------------------------------------------------------------------------
 # Force unbuffered stdout so prints appear immediately in PowerShell
 # ---------------------------------------------------------------------------
@@ -225,6 +231,10 @@ async def startup_banner():
     logger.info("  Waiting for signal requests from MT5 EA...")
     logger.info("=" * 60)
     _start_mobile_discovery()
+    if start_telegram():
+        logger.info("  Telegram signal notifier: ENABLED")
+    else:
+        logger.info("  Telegram signal notifier: disabled (token not configured)")
     logger.info("")
 
 # ---------------------------------------------------------------------------
@@ -793,6 +803,9 @@ async def generate_signal(req: SignalRequest):
             logger.info("─" * 60)
 
             _publish_mobile_state(req, signal)
+            sent = send_telegram_signal(signal)
+            if sent:
+                logger.info(f"   📲 Telegram: signal sent to {sent} chat(s)")
             return signal
 
         except (openai.APITimeoutError, asyncio.TimeoutError) as e:
