@@ -7,18 +7,28 @@ echo GoldMind AI - LAN Signal Server
 echo ============================================================
 echo.
 
-REM Open the two LAN ports required by the Android signal client.
-REM If this CMD is not elevated, the server will still start; the
-REM existing firewall rules are left unchanged.
-netsh advfirewall firewall add rule name="GoldTraderPro TCP 8000" dir=in action=allow protocol=TCP localport=8000 >nul 2>&1
-netsh advfirewall firewall add rule name="GoldTraderPro UDP 8766" dir=in action=allow protocol=UDP localport=8766 >nul 2>&1
+REM This server must be reachable from Android on the LAN.
+REM Elevate once so Windows Firewall rules are actually applied.
+fltmc >nul 2>&1
+if errorlevel 1 (
+  echo Requesting Administrator permission for Windows Firewall...
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+  exit /b
+)
 
-echo LAN ports prepared: TCP 8000 / UDP 8766
+netsh advfirewall firewall add rule name="GoldTraderPro TCP 8000" dir=in action=allow protocol=TCP localport=8000 profile=any >nul
+if errorlevel 1 echo [WARNING] TCP 8000 firewall rule could not be added.
+
+netsh advfirewall firewall add rule name="GoldTraderPro UDP 8766" dir=in action=allow protocol=UDP localport=8766 profile=any >nul
+if errorlevel 1 echo [WARNING] UDP 8766 firewall rule could not be added.
+
+echo LAN firewall rules prepared: TCP 8000 / UDP 8766
 echo Starting server on 0.0.0.0:8000 ...
 echo Keep this window open while using the Android app.
 echo.
 
 python main.py
+
 echo.
-echo Server stopped. Press any key to close.
+echo Server stopped.
 pause
