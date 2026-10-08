@@ -84,9 +84,10 @@ logger.info("=" * 60)
 # ---------------------------------------------------------------------------
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.2")
-FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gpt-5")
+AI_BASE_URL = os.getenv("AI_BASE_URL", "http://localhost:20128/v1").rstrip("/")
+AI_API_KEY = os.getenv("OMNIROUTE_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("AI_MODEL") or os.getenv("OPENAI_MODEL", "auto")
+FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "")
 
 app = FastAPI(title="GoldMind AI Signal Backend", version="1.0.0")
 
@@ -222,7 +223,8 @@ async def startup_banner():
     logger.info("=" * 60)
     logger.info("  GoldMind AI Signal Backend")
     logger.info("=" * 60)
-    logger.info(f"  Model:    {OPENAI_MODEL} (fallback: {FALLBACK_MODEL})")
+    logger.info(f"  AI Gateway: {AI_BASE_URL}")
+    logger.info(f"  Model:      {OPENAI_MODEL} (fallback: {FALLBACK_MODEL or 'disabled'})")
     logger.info(f"  API Key:  {key_preview}")
     logger.info(f"  Server:   http://127.0.0.1:8000")
     logger.info(f"  Health:   http://127.0.0.1:8000/health")
@@ -688,7 +690,7 @@ async def generate_signal(req: SignalRequest):
     logger.info(f"   Candles: {total_candles} total across {len(req.candles)} timeframes")
     logger.info(f"   Timeframes: {tf_summary}")
     logger.info(f"   ATR: {req.atr}")
-    logger.info(f"   Model: {OPENAI_MODEL}")
+    logger.info(f"   AI Gateway: {AI_BASE_URL}  Model: {OPENAI_MODEL}")
 
     # 1. Compute ATR if not provided
     atr_value = req.atr if req.atr is not None else compute_atr(req.candles)
@@ -712,7 +714,7 @@ async def generate_signal(req: SignalRequest):
         return veto_response(req.symbol, f"spread {req.spread_points} > max {req.constraints.max_spread_points}")
 
     # 4. Call OpenAI with Structured Outputs (with fallback)
-    client = AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=60.0)
+    client = AsyncOpenAI(api_key=AI_API_KEY or "omniroute", base_url=AI_BASE_URL, timeout=60.0)
     models_to_try = [OPENAI_MODEL]
     if FALLBACK_MODEL and FALLBACK_MODEL != OPENAI_MODEL:
         models_to_try.append(FALLBACK_MODEL)
@@ -729,7 +731,7 @@ async def generate_signal(req: SignalRequest):
             if is_fallback:
                 logger.warning(f"   🔄 Falling back to {model}...")
             else:
-                logger.info(f"   ⏳ Calling OpenAI ({model})...")
+                logger.info(f"   ⏳ Calling AI gateway ({model})...")
             sys.stdout.flush()
             start_time = time.time()
 
