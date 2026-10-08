@@ -3,7 +3,15 @@ import os
 import sys
 import threading
 import urllib.request
+from pathlib import Path
 import tkinter as tk
+
+# Packaged EXE: load .env from the EXE folder; source run: load from repo.
+APP_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+ENV_FILE = os.path.join(APP_DIR, ".env")
+if os.path.exists(ENV_FILE):
+    from dotenv import load_dotenv
+    load_dotenv(ENV_FILE, override=False)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BACKEND = os.path.join(ROOT, "backend")
