@@ -39,7 +39,7 @@ string JsonNumber(double v,int digits)
 string JsonEscape(string s)
 {
    StringReplace(s,"\\","\\\\");
-   StringReplace(s,""","\\"");
+   StringReplace(s,"\\\"","\\\\\\\"");
    StringReplace(s,"\r","");
    StringReplace(s,"\n"," ");
    return s;
