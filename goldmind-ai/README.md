@@ -1,3 +1,20 @@
+# ⚠️ Project Mode: SIGNAL-ONLY
+
+This repository integration is intentionally **signal-only**.
+
+- MT5 supplies live XAUUSD/GOLD market data.
+- FastAPI + AI analyzes the data.
+- The result is displayed as **BUY / SELL / WAIT + Entry / SL / TP + confidence**.
+- **No automatic order is opened, modified, or cancelled by this project.**
+- Use `GoldMind_AI_SIGNAL_ONLY.mq5` from `mt5/Experts/`.
+- Do **not** use the upstream `GoldMind_AI.ex5` execution EA.
+- For a short-horizon signal, the default MT5 primary timeframe is M5 and the backend is instructed to prefer setups suitable for roughly the next 10 minutes.
+- If market data is insufficient, spread is too high, ATR is unavailable, or the AI returns invalid geometry, the system returns **WAIT / NO DATA** rather than inventing a signal.
+
+> The upstream GoldMind project is execution-capable. This repository deliberately replaces that behavior with a signal-only EA.
+
+---
+
 # 🤖 GoldMind AI — MT5 Trading System
 
 > **What is this?** An AI-powered trading tool that uses OpenAI GPT to analyze gold (XAUUSD) price charts across multiple timeframes and automatically place trades in MetaTrader 5. It runs entirely on your own computer — just start the Python server and the EA in MT5.
