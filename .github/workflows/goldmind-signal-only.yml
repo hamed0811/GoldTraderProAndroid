@@ -1,0 +1,40 @@
+name: GoldMind Signal-Only Validation
+
+on:
+  push:
+    paths:
+      - "goldmind-ai/**"
+  pull_request:
+    paths:
+      - "goldmind-ai/**"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python syntax
+        run: python -m py_compile goldmind-ai/backend/main.py
+      - name: Verify MT5 EA is signal-only
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path("goldmind-ai/mt5/Experts/GoldMind_AI_SIGNAL_ONLY.mq5")
+          s = p.read_text(encoding="utf-8").lower()
+          forbidden = [
+              "ctrade",
+              "trade.buy",
+              "trade.sell",
+              "trade.buy_stop",
+              "trade.sell_stop",
+              "order_send",
+              "positionmodify",
+              "ordersend",
+          ]
+          bad = [x for x in forbidden if x in s]
+          assert not bad, f"Execution API markers found: {bad}"
+          assert "signal only" in s
+          assert "webrequest(" in s
