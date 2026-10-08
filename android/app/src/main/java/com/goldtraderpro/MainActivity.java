@@ -12,6 +12,14 @@ import org.json.*;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.Inet4Address;
+import java.net.NetworkInterface;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.Enumeration;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends Activity {
@@ -75,7 +83,9 @@ public class MainActivity extends Activity {
                     }
                 }
             } catch(Exception ignored) {
-                // Discovery may be blocked by the Wi-Fi/router. Polling will retry discovery.
+                // Some Xiaomi/MIUI routers block LAN broadcast. Fall back to a direct
+                // /24 scan of the phone's current Wi-Fi subnet and verify /health.
+                if(base==null) base=scanLocalSubnet();
             } finally {
                 if(socket!=null) socket.close();
                 discovering=false;
@@ -92,6 +102,55 @@ public class MainActivity extends Activity {
                 }
             });
         }).start();
+    }
+
+    private String scanLocalSubnet(){
+        try{
+            Enumeration<NetworkInterface> interfaces=NetworkInterface.getNetworkInterfaces();
+            while(interfaces.hasMoreElements()){
+                NetworkInterface ni=interfaces.nextElement();
+                if(!ni.isUp() || ni.isLoopback()) continue;
+                Enumeration<java.net.InetAddress> addrs=ni.getInetAddresses();
+                while(addrs.hasMoreElements()){
+                    java.net.InetAddress addr=addrs.nextElement();
+                    if(!(addr instanceof Inet4Address) || addr.isLoopbackAddress()) continue;
+                    String ip=addr.getHostAddress();
+                    int dot=ip.lastIndexOf('.');
+                    if(dot<0) continue;
+                    String prefix=ip.substring(0,dot+1);
+
+                    ExecutorService pool=Executors.newFixedThreadPool(32);
+                    AtomicReference<String> found=new AtomicReference<>(null);
+                    for(int i=1;i<=254;i++){
+                        final String host=prefix+i;
+                        pool.submit(() -> {
+                            if(found.get()!=null) return;
+                            HttpURLConnection conn=null;
+                            try{
+                                URL u=new URL("http://"+host+":8000/health");
+                                conn=(HttpURLConnection)u.openConnection();
+                                conn.setConnectTimeout(180);
+                                conn.setReadTimeout(180);
+                                conn.setRequestMethod("GET");
+                                if(conn.getResponseCode()==200 && found.compareAndSet(null,"http://"+host+":8000")){
+                                    // First valid GoldMind health endpoint wins.
+                                }
+                            }catch(Exception ignored){} finally{
+                                if(conn!=null) conn.disconnect();
+                            }
+                        });
+                    }
+                    pool.shutdown();
+                    long deadline=System.currentTimeMillis()+2500;
+                    while(System.currentTimeMillis()<deadline && found.get()==null){
+                        Thread.sleep(50);
+                    }
+                    pool.shutdownNow();
+                    if(found.get()!=null) return found.get();
+                }
+            }
+        }catch(Exception ignored){}
+        return null;
     }
 
     private void poll(){
