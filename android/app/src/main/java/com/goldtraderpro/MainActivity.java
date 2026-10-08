@@ -142,7 +142,7 @@ public class MainActivity extends Activity {
 
     private void set(TextView v,String s){runOnUiThread(()->v.setText(s));}
     private void ui(String s){runOnUiThread(()->health.setText(s));}
-    private void setSignal(String s){runOnUiThread(()->signal.setText(s);}
+    private void setSignal(String s){runOnUiThread(()->signal.setText(s));}
 
     @Override protected void onDestroy(){
         handler.removeCallbacksAndMessages(null);
