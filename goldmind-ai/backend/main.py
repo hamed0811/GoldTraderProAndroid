@@ -580,14 +580,12 @@ def _timeframe_alignment(candles: dict[str, list[CandleData]]) -> tuple[str, int
         closes = [c.close for c in candles[tf]]
         if len(closes) < 21:
             return "neutral", 0, 0, f"{tf}_insufficient_history"
-        ema = sum(closes[:20]) / 20.0
+        prior_window = closes[-21:-1]
+        previous_ema = sum(prior_window) / len(prior_window)
         alpha = 2.0 / 21.0
-        previous_ema = ema
-        for value in closes[20:-1]:
-            previous_ema = ema
-            ema = alpha * value + (1.0 - alpha) * ema
-        prior_close = closes[-2]
         latest_close = closes[-1]
+        ema = alpha * latest_close + (1.0 - alpha) * previous_ema
+        prior_close = closes[-2]
         if latest_close > ema and ema > previous_ema and latest_close > prior_close:
             bullish += 1
             notes.append(f"{tf}:bull")
@@ -739,7 +737,7 @@ BINANCE_GOLD_SYMBOL = "XAUUSDT"
 BINANCE_POINT = 0.01
 BIQUOTE_BASE = "https://biquote.io"
 MAX_QUOTE_AGE_SECONDS = 15
-REQUIRED_TIMEFRAMES = {"M1": 30, "M5": 30, "M15": 30, "M30": 30, "H1": 20, "H4": 20, "D1": 20}
+REQUIRED_TIMEFRAMES = {"M1": 30, "M5": 30, "M15": 30, "M30": 30, "H1": 20, "H4": 20, "D1": 21}
 TIMEFRAME_MAX_AGE_SECONDS = {"M1": 125, "M5": 615, "M15": 1815, "M30": 7215, "H1": 64815, "H4": 259215, "D1": 432015}
 _ACTIVE_MARKET_SOURCE = "Binance USDⓈ-M Futures"
 _ACTIVE_SOURCE_SYMBOL = BINANCE_GOLD_SYMBOL
