@@ -2,7 +2,7 @@
 #property version   "2.0"
 #property description "GoldMind AI - SIGNAL ONLY. Reads MT5 market data and requests analysis; never sends, modifies, or deletes trades."
 
-input string InpBackendURL      = "http://127.0.0.1:8000/signal";
+input string InpBackendURL      = "https://ai-cloud-workspace-api.onrender.com/signal";
 input ENUM_TIMEFRAMES InpPrimaryTF = PERIOD_M5;
 input int    InpCandleCount     = 120;
 input int    InpRefreshSeconds  = 60;
@@ -182,7 +182,9 @@ void PrintSignal(string body)
       Print("SIGNAL: WAIT | Reason: ",reason);
    else
    {
-      string signal_type=type;\n      StringToUpper(signal_type);\n      Print("SIGNAL: ",signal_type);
+      string signal_type=type;
+      StringToUpper(signal_type);
+      Print("SIGNAL: ",signal_type);
       Print("Entry: ",DoubleToString(entry,(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS)),
             " | SL: ",DoubleToString(sl,(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS)),
             " | TP: ",DoubleToString(tp,(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS)));
