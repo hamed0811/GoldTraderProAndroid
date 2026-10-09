@@ -854,42 +854,6 @@ A Persian, independent synthesis of five classic trading and investing books is 
 
 ---
 
-## 📲 Telegram — Signal Only
-
-The Telegram integration is now **signal-only**. It sends validated BUY/SELL signals from the same backend; it does not place, modify, cancel, or manage MT5 orders.
-
-Bot:
-- Username: @GoldTraderProSignalBot
-- Link: https://t.me/GoldTraderProSignalBot
-
-### Windows setup
-
-1. Open the bot in Telegram and press **Start**.
-2. In `goldmind-ai\\backend`, create your local `.env` from `.env.example` if needed.
-3. Add your BotFather token locally:
-   ```
-   TELEGRAM_BOT_TOKEN=YOUR_REAL_TOKEN
-   TELEGRAM_SEND_WAIT=false
-   TELEGRAM_POLL_SECONDS=2
-   ```
-4. Start the backend:
-   ```
-   python main.py
-   ```
-5. The backend registers the private chat automatically after `/start`.
-6. When a validated BUY/SELL signal is produced, it is sent to the registered Telegram chat.
-
-**Never commit the real Telegram token.** The backend `.gitignore` excludes `.env` and logs. Telegram documents that the bot token is an authentication credential and should be kept secret.
-
-### Message format
-
-`BUY/SELL + Entry + SL + TP + Confidence + signal validity`
-
-`WAIT` is not sent by default (`TELEGRAM_SEND_WAIT=false`) so Telegram remains a clean signal channel.
-
-
----
-
 ## GoldTrader Pro data-integrity gates and free AI provider
 
 The Android signal server uses the existing Render service. It does not place orders.
