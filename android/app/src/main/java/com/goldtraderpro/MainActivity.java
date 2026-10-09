@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 public class MainActivity extends Activity {
     private static final int DISCOVERY_PORT = 8766;
     private static final String DISCOVERY_MESSAGE = "GOLDTRADER_DISCOVER";
+    private static final String CLOUD_BASE = "https://ai-cloud-workspace-api.onrender.com";
     private final OkHttpClient client = new OkHttpClient.Builder().retryOnConnectionFailure(true).build();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private TextView health, price, signal, entry, sl, tp, reasons, protection, server;
@@ -43,9 +44,11 @@ public class MainActivity extends Activity {
         reasons=findViewById(R.id.reasons);
         protection=findViewById(R.id.protection);
         server=findViewById(R.id.server);
-        server.setText("Server: در حال جستجوی سرور...");
+        base=CLOUD_BASE;
+        server.setText("Server: Cloud "+base);
         createChannels();
-        discoverServer();
+        ui("● CONNECTING TO CLOUD...");
+        schedulePoll(0);
     }
 
     private void createChannels(){
@@ -174,27 +177,44 @@ public class MainActivity extends Activity {
         return null;
     }
 
+    private boolean isCloudBase(){
+        return base!=null && base.startsWith(CLOUD_BASE);
+    }
+
     private void poll(){
-        if(base==null) return;
-        Request r=new Request.Builder().url(base+"/api/state").build();
-        client.newCall(r).enqueue(new Callback(){
-            public void onFailure(Call c,java.io.IOException e){
-                ui("● NO DATA / SERVER");
-                handler.postDelayed(MainActivity.this::discoverServer,3000);
+        if(base==null) base=CLOUD_BASE;
+        Request request=new Request.Builder().url(base+"/api/state").build();
+        client.newCall(request).enqueue(new Callback(){
+            public void onFailure(Call call,java.io.IOException e){
+                if(isCloudBase()){
+                    ui("● CLOUD OFFLINE / RETRYING");
+                    schedulePoll(5000);
+                } else {
+                    base=CLOUD_BASE;
+                    server.setText("Server: Cloud "+base);
+                    ui("● SWITCHING TO CLOUD");
+                    schedulePoll(0);
+                }
             }
-            public void onResponse(Call c,Response r)throws java.io.IOException{
+            public void onResponse(Call call,Response response)throws java.io.IOException{
                 try {
-                    if(r.isSuccessful() && r.body()!=null) {
-                        parse(r.body().string());
+                    if(response.isSuccessful() && response.body()!=null) {
+                        parse(response.body().string());
+                        schedulePoll(5000);
+                    } else if(isCloudBase()) {
+                        ui("● CLOUD HTTP "+response.code()+" / RETRYING");
+                        schedulePoll(5000);
                     } else {
-                        ui("● NO DATA / SERVER");
+                        base=CLOUD_BASE;
+                        server.setText("Server: Cloud "+base);
+                        ui("● LOCAL SERVER FAILED / SWITCHING TO CLOUD");
+                        schedulePoll(0);
                     }
                 } finally {
-                    r.close();
+                    response.close();
                 }
             }
         });
-        handler.postDelayed(this::poll,5000);
     }
 
     private void parse(String raw){
