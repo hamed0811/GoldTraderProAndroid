@@ -876,3 +876,8 @@ The backend uses Google's OpenAI-compatible endpoint for structured JSON respons
 - If the quote becomes stale while the model is responding, the result is discarded.
 - The displayed confidence is a five-timeframe confluence score, not a statistically calibrated win probability.
 - Missing provider credentials, stale data, incomplete candles, or disagreement result in WAIT / NO DATA. No synthetic prices or fabricated signals are used.
+
+
+## Android AI API settings
+
+The Android app includes fields for an AI provider, API base URL, model, and API key. The API key is encrypted locally using Android Keystore. In this version, these fields are saved for future integration only; the app does not send the key to the backend or call the provider. Telegram signal delivery has been removed; the app remains signal-only.
