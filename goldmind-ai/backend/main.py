@@ -572,6 +572,39 @@ def get_session_info(utc_time: datetime, symbol: str = "XAUUSD") -> dict:
 # Build system prompt for OpenAI
 # ---------------------------------------------------------------------------
 
+def _timeframe_alignment(candles: dict[str, list[CandleData]]) -> tuple[str, int, int, str]:
+    """Return directional vote counts from M5/M15/H1/H4/D1 closed candles."""
+    bullish = bearish = 0
+    notes = []
+    for tf in ("M5", "M15", "H1", "H4", "D1"):
+        closes = [c.close for c in candles[tf]]
+        if len(closes) < 21:
+            return "neutral", 0, 0, f"{tf}_insufficient_history"
+        ema = sum(closes[:20]) / 20.0
+        alpha = 2.0 / 21.0
+        previous_ema = ema
+        for value in closes[20:-1]:
+            previous_ema = ema
+            ema = alpha * value + (1.0 - alpha) * ema
+        prior_close = closes[-2]
+        latest_close = closes[-1]
+        if latest_close > ema and ema > previous_ema and latest_close > prior_close:
+            bullish += 1
+            notes.append(f"{tf}:bull")
+        elif latest_close < ema and ema < previous_ema and latest_close < prior_close:
+            bearish += 1
+            notes.append(f"{tf}:bear")
+        else:
+            notes.append(f"{tf}:mixed")
+    if bullish >= 4:
+        direction = "bullish"
+    elif bearish >= 4:
+        direction = "bearish"
+    else:
+        direction = "neutral"
+    return direction, bullish, bearish, ",".join(notes)
+
+
 def build_system_prompt(req: SignalRequest, atr_value: float) -> str:
     now_utc = datetime.now(timezone.utc)
     session = get_session_info(now_utc, req.symbol)
@@ -912,7 +945,7 @@ async def _binance_gold_feed_loop() -> None:
                 "source_symbol": None, "updated_at_utc": datetime.now(timezone.utc).isoformat(),
                 "data_status": "NO_DATA", "note": "Live quote unavailable or stale; no signal",
             })
-        await asyncio.sleep(15)
+        await asyncio.sleep(5)
 
 
 # ---------------------------------------------------------------------------
@@ -1038,14 +1071,20 @@ async def generate_signal(req: SignalRequest):
             # --- FIX Issue 3: Override timestamp with actual server time ---
             signal.timestamp_utc = datetime.now(timezone.utc).isoformat()
 
-            # Hard server-side validation: AI output can never become an executable action.
-            # Invalid geometry is converted to WAIT instead of being passed through.
-            if signal.order.type.value == "buy_stop":
-                valid = signal.order.entry > req.ask and signal.order.sl < signal.order.entry and signal.order.tp > signal.order.entry
-            elif signal.order.type.value == "sell_stop":
-                valid = signal.order.entry < req.bid and signal.order.sl > signal.order.entry and signal.order.tp < signal.order.entry
+            # Hard server-side validation: AI output is informational only and never executed.
+            side = signal.order.type.value
+            if side == "buy_stop":
+                valid = signal.order.entry > req.ask and signal.order.sl < signal.order.entry < signal.order.tp
+                expected_bias = "bullish"
+            elif side == "sell_stop":
+                valid = signal.order.entry < req.bid and signal.order.sl > signal.order.entry > signal.order.tp
+                expected_bias = "bearish"
             else:
                 valid = True
+                expected_bias = "neutral"
+            levels = (signal.order.entry, signal.order.sl, signal.order.tp)
+            if side != "none" and not all(math.isfinite(value) and value > 0 for value in levels):
+                valid = False
             if signal.veto:
                 signal.order.type = OrderTypeEnum.none
                 signal.order.entry = 0.0
@@ -1055,16 +1094,23 @@ async def generate_signal(req: SignalRequest):
             elif not valid:
                 logger.warning("   🚫 VETO: invalid signal geometry returned by model")
                 return _publish_veto(req, "invalid_signal_geometry")
-
-            # --- Log R:R for info (no auto-correction, use AI's original TP) ---
-            if not signal.veto and signal.order.type.value != "none":
-                entry = signal.order.entry
-                sl = signal.order.sl
-                tp = signal.order.tp
+            elif side != "none":
+                if signal.confidence < 0.80:
+                    return _publish_veto(req, f"confidence_below_entry_threshold:{signal.confidence:.2f}")
+                if signal.bias.value != expected_bias:
+                    return _publish_veto(req, "ai_bias_order_side_disagreement")
+                direction, bull_votes, bear_votes, alignment = _timeframe_alignment(req.candles)
+                if direction != expected_bias:
+                    return _publish_veto(req, f"multi_timeframe_disagreement:{alignment}")
+                entry, sl, tp = levels
                 sl_dist = abs(entry - sl)
                 tp_dist = abs(tp - entry)
                 rr = tp_dist / sl_dist if sl_dist > 0 else 0
-                logger.info(f"   📐 R:R ratio: {rr:.2f} (using AI's original TP)")
+                if sl_dist <= 0 or rr < req.constraints.min_rr:
+                    return _publish_veto(req, f"risk_reward_below_minimum:{rr:.2f}")
+                logger.info(f"   📐 R:R ratio: {rr:.2f}; MTF alignment: {alignment}")
+
+            # No order is submitted; this remains a signal-only display payload.
 
             # Log the result
             if signal.veto:
