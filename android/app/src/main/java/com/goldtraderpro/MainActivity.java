@@ -232,9 +232,24 @@ public class MainActivity extends Activity {
             JSONObject o=new JSONObject(raw);
             JSONObject s=o.optJSONObject("signal");
             String p=o.optString("price","");
-            ui(p.isEmpty()?"● WAITING FOR MT5":("● LIVE  "+p));
+            // The price TextView was never updated, so its XML placeholder stayed "No data"
+            // even when /api/state returned a valid live cloud price.
+            set(price, p.isEmpty() ? "XAUUSD\\nNo data" : "XAUUSD\\n" + p);
+            String dataStatus=o.optString("data_status","");
+            String source=o.optString("source","");
+            if(!p.isEmpty()) {
+                ui("● LIVE  " + p + (source.isEmpty() ? "" : "  |  " + source));
+            } else {
+                ui("● " + (dataStatus.isEmpty() ? "WAITING FOR DATA" : dataStatus));
+            }
+            JSONObject pr=o.optJSONObject("protection");
+            set(protection,"Smart Protection: "+(pr==null?"OFF":pr.optString("mode","OFF")));
             if(s==null){
-                setSignal("WAIT — منتظر داده MT5");
+                setSignal("WAIT — هنوز سیگنال معتبری صادر نشده");
+                set(entry,"ENTRY\\n—");
+                set(sl,"SL\\n—");
+                set(tp,"TP1\\n—");
+                set(reasons,"وضعیت\\nداده قیمت دریافت شد؛ سیگنال موجود نیست");
                 return;
             }
             String state=s.optString("state","WAIT");
