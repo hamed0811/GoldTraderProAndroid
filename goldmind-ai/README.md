@@ -886,3 +886,29 @@ Bot:
 `BUY/SELL + Entry + SL + TP + Confidence + signal validity`
 
 `WAIT` is not sent by default (`TELEGRAM_SEND_WAIT=false`) so Telegram remains a clean signal channel.
+
+
+---
+
+## GoldTrader Pro data-integrity gates and free AI provider
+
+The Android signal server uses the existing Render service. It does not place orders.
+
+### Free Gemini setup on Render
+
+Set these environment variables on the existing Render web service (never commit a key to GitHub):
+
+- `AI_PROVIDER=gemini`
+- `GEMINI_API_KEY` = API key created in Google AI Studio
+- `GEMINI_MODEL=gemini-2.5-flash` (default)
+
+The backend uses Google's OpenAI-compatible endpoint for structured JSON responses. Free-tier availability and request limits depend on the Google account, region, model, and current quota. Until the key is configured and a live response passes validation, the API deliberately returns WAIT.
+
+### Data and signal acceptance rules
+
+- Quote timestamp must be within 15 seconds; future timestamps beyond a 5-second clock-skew allowance are rejected.
+- Closed M1, M5, M15, M30, H1, H4 and D1 candles must be present, chronological, internally consistent, and fresh for their timeframe.
+- Signal geometry, positive price levels, model confidence floor, at least 4-of-5 aligned M5/M15/H1/H4/D1 trends, and the configured minimum risk/reward are checked server-side.
+- If the quote becomes stale while the model is responding, the result is discarded.
+- The displayed confidence is a five-timeframe confluence score, not a statistically calibrated win probability.
+- Missing provider credentials, stale data, incomplete candles, or disagreement result in WAIT / NO DATA. No synthetic prices or fabricated signals are used.
