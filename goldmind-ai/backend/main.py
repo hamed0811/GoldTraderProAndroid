@@ -603,6 +603,72 @@ def _timeframe_alignment(candles: dict[str, list[CandleData]]) -> tuple[str, int
     return direction, bullish, bearish, ",".join(notes)
 
 
+def _engine_only_signal(req: SignalRequest, atr_value: float) -> Optional[SignalResponse]:
+    """Deterministic fallback: emit only a fresh M1 breakout aligned with >=4/5 higher TF trends."""
+    if not math.isfinite(atr_value) or atr_value <= 0:
+        return None
+    direction, bull_votes, bear_votes, alignment = _timeframe_alignment(req.candles)
+    m1 = req.candles.get("M1", [])
+    if direction not in ("bullish", "bearish") or len(m1) < 6:
+        return None
+    mid = (req.bid + req.ask) / 2.0
+    if abs(mid - m1[-1].close) > 2.0 * atr_value:
+        return None
+
+    prior = m1[-6:-1]
+    last_three = [c.close for c in m1[-3:]]
+    buffer = max(0.10 * atr_value, 2.0 * req.point, req.spread_points * req.point)
+    score = max(bull_votes, bear_votes) / 5.0
+
+    if direction == "bullish":
+        prior_level = max(c.high for c in prior)
+        rising = last_three[0] < last_three[1] < last_three[2]
+        if not rising or m1[-1].close <= prior_level:
+            return None
+        entry = max(prior_level + buffer, req.ask + buffer)
+        if entry - req.ask > 0.75 * atr_value:
+            return None
+        sl = entry - 1.2 * atr_value
+        tp = entry + 1.8 * atr_value
+        bias, order_type = BiasEnum.bullish, OrderTypeEnum.buy_stop
+    else:
+        prior_level = min(c.low for c in prior)
+        falling = last_three[0] > last_three[1] > last_three[2]
+        if not falling or m1[-1].close >= prior_level:
+            return None
+        entry = min(prior_level - buffer, req.bid - buffer)
+        if req.bid - entry > 0.75 * atr_value:
+            return None
+        sl = entry + 1.2 * atr_value
+        tp = entry - 1.8 * atr_value
+        bias, order_type = BiasEnum.bearish, OrderTypeEnum.sell_stop
+
+    digits = max(0, min(int(req.digits), 8))
+    entry, sl, tp = (round(value, digits) for value in (entry, sl, tp))
+    if min(entry, sl, tp) <= 0:
+        return None
+    risk = abs(entry - sl)
+    reward = abs(tp - entry)
+    if risk <= 0 or reward / risk < req.constraints.min_rr:
+        return None
+    return SignalResponse(
+        symbol=req.symbol,
+        timestamp_utc=datetime.now(timezone.utc).isoformat(),
+        bias=bias,
+        order=OrderResponse(
+            type=order_type,
+            entry=entry,
+            sl=sl,
+            tp=tp,
+            expiry_minutes=10,
+            comment=f"ENGINE_ONLY MTF {max(bull_votes, bear_votes)}/5 breakout",
+        ),
+        confidence=score,
+        veto=False,
+        veto_reason="",
+    )
+
+
 def build_system_prompt(req: SignalRequest, atr_value: float) -> str:
     now_utc = datetime.now(timezone.utc)
     session = get_session_info(now_utc, req.symbol)
@@ -1018,8 +1084,16 @@ async def generate_signal(req: SignalRequest):
     # 4. Call the configured AI provider with structured JSON output.
     client, selected_provider, models_to_try = _get_ai_config()
     if not client or not models_to_try:
-        logger.warning("No AI provider credential configured; returning safe WAIT state")
-        return _publish_veto(req, "model_unavailable: configure a free Gemini API key or a supported provider")
+        logger.warning("No AI provider credential configured; evaluating deterministic ENGINE_ONLY fallback")
+        engine_signal = _engine_only_signal(req, atr_value)
+        if engine_signal is None:
+            return _publish_veto(req, "ENGINE_ONLY: no validated 10-minute breakout; WAIT")
+        _publish_mobile_state(req, engine_signal)
+        sent = send_telegram_signal(engine_signal)
+        if sent:
+            logger.info(f"   📲 Telegram: ENGINE_ONLY signal sent to {sent} chat(s)")
+        logger.info("   ENGINE_ONLY signal accepted; no order execution is available")
+        return engine_signal
 
     messages = [
         {"role": "system", "content": build_system_prompt(req, atr_value)},
