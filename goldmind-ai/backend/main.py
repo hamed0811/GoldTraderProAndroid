@@ -16,6 +16,7 @@ import traceback
 import socket
 import threading
 import json
+import math
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -152,7 +153,7 @@ def _publish_mobile_state(req: "SignalRequest", signal: "SignalResponse") -> Non
         "protection": {"mode": "OFF"},
         "source": _ACTIVE_MARKET_SOURCE,
         "source_symbol": _ACTIVE_SOURCE_SYMBOL,
-        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "updated_at_utc": req.server_time_utc,
         "data_status": "LIVE",
         "note": _ACTIVE_SOURCE_NOTE,
     })
@@ -680,6 +681,9 @@ BINANCE_FAPI_BASE = "https://fapi.binance.com"
 BINANCE_GOLD_SYMBOL = "XAUUSDT"
 BINANCE_POINT = 0.01
 BIQUOTE_BASE = "https://biquote.io"
+MAX_QUOTE_AGE_SECONDS = 15
+REQUIRED_TIMEFRAMES = {"M1": 30, "M5": 30, "M15": 30, "M30": 30, "H1": 20, "H4": 20, "D1": 20}
+TIMEFRAME_MAX_AGE_SECONDS = {"M1": 125, "M5": 615, "M15": 1815, "M30": 3615, "H1": 7215, "H4": 28815, "D1": 172815}
 _ACTIVE_MARKET_SOURCE = "Binance USDⓈ-M Futures"
 _ACTIVE_SOURCE_SYMBOL = BINANCE_GOLD_SYMBOL
 _ACTIVE_SOURCE_NOTE = "Gold perpetual quote; may differ from broker XAUUSD"
@@ -735,55 +739,83 @@ def _to_biquote_candles(payload: dict, limit: int) -> list[CandleData]:
     return result[-limit:]
 
 
+def _validate_feed_candles(candles: dict[str, list[CandleData]], now: datetime) -> None:
+    """Reject incomplete, malformed, out-of-order, or stale closed-candle series."""
+    for tf, minimum in REQUIRED_TIMEFRAMES.items():
+        series = candles.get(tf, [])
+        if len(series) < minimum:
+            raise ValueError(f"{tf} has insufficient closed candles ({len(series)} < {minimum})")
+        parsed_times = []
+        for candle in series:
+            values = (candle.open, candle.high, candle.low, candle.close, candle.volume)
+            if not all(math.isfinite(value) for value in values):
+                raise ValueError(f"{tf} contains non-finite candle values")
+            if min(candle.open, candle.high, candle.low, candle.close) <= 0:
+                raise ValueError(f"{tf} contains non-positive OHLC values")
+            if candle.high < max(candle.open, candle.close, candle.low) or candle.low > min(candle.open, candle.close, candle.high):
+                raise ValueError(f"{tf} contains invalid OHLC geometry")
+            candle_time = datetime.fromisoformat(candle.time.replace("Z", "+00:00")).astimezone(timezone.utc)
+            if candle_time > now + timedelta(seconds=5):
+                raise ValueError(f"{tf} contains a future candle")
+            parsed_times.append(candle_time)
+        if parsed_times != sorted(parsed_times) or len(set(parsed_times)) != len(parsed_times):
+            raise ValueError(f"{tf} candles are not strictly chronological")
+        age = (now - parsed_times[-1]).total_seconds()
+        if age < -5 or age > TIMEFRAME_MAX_AGE_SECONDS[tf]:
+            raise ValueError(f"{tf} last closed candle is stale (age={age:.1f}s)")
+
+
 async def _load_binance_market():
-    book, m1_rows, m5_rows, m15_rows = await asyncio.gather(
+    """Load timestamped Binance gold data and closed candles across all required timeframes."""
+    book, trades, *rows_by_tf = await asyncio.gather(
         asyncio.to_thread(_fetch_binance_json, "/fapi/v1/ticker/bookTicker", {"symbol": BINANCE_GOLD_SYMBOL}),
-        asyncio.to_thread(_fetch_binance_json, "/fapi/v1/klines", {"symbol": BINANCE_GOLD_SYMBOL, "interval": "1m", "limit": 120}),
-        asyncio.to_thread(_fetch_binance_json, "/fapi/v1/klines", {"symbol": BINANCE_GOLD_SYMBOL, "interval": "5m", "limit": 80}),
-        asyncio.to_thread(_fetch_binance_json, "/fapi/v1/klines", {"symbol": BINANCE_GOLD_SYMBOL, "interval": "15m", "limit": 80}),
+        asyncio.to_thread(_fetch_binance_json, "/fapi/v1/aggTrades", {"symbol": BINANCE_GOLD_SYMBOL, "limit": 1}),
+        *[
+            asyncio.to_thread(_fetch_binance_json, "/fapi/v1/klines", {"symbol": BINANCE_GOLD_SYMBOL, "interval": interval, "limit": limit})
+            for interval, limit in (("1m", 120), ("5m", 80), ("15m", 80), ("30m", 80), ("1h", 80), ("4h", 80), ("1d", 80))
+        ],
     )
     now = datetime.now(timezone.utc)
+    if not isinstance(trades, list) or not trades:
+        raise ValueError("Binance has no timestamped recent gold trade")
+    trade_ms = int(trades[-1].get("T", 0))
+    quote_time = datetime.fromtimestamp(trade_ms / 1000, tz=timezone.utc)
+    quote_age = (now - quote_time).total_seconds()
+    if quote_age < -5 or quote_age > MAX_QUOTE_AGE_SECONDS:
+        raise ValueError(f"Binance last trade is stale or future-dated (age={quote_age:.1f}s)")
     bid, ask = float(book["bidPrice"]), float(book["askPrice"])
-    candles = {
-        "M1": _to_candles(m1_rows, int(now.timestamp() * 1000), 100),
-        "M5": _to_candles(m5_rows, int(now.timestamp() * 1000), 60),
-        "M15": _to_candles(m15_rows, int(now.timestamp() * 1000), 60),
-    }
-    if any(not candles[tf] for tf in candles) or bid <= 0 or ask < bid:
-        raise ValueError("Binance returned incomplete or invalid gold market data")
-    latest = datetime.fromisoformat(candles["M1"][-1].time)
-    if (now - latest).total_seconds() > 180:
-        raise ValueError("Binance gold candles are stale")
-    return now, bid, ask, candles, "Binance USDⓈ-M Futures", BINANCE_GOLD_SYMBOL, "Gold perpetual quote; may differ from broker XAUUSD"
+    intervals = ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
+    candles = {tf: _to_candles(rows, int(now.timestamp() * 1000), 60) for tf, rows in zip(intervals, rows_by_tf)}
+    if not (bid > 0 and ask >= bid):
+        raise ValueError("Binance returned invalid bid/ask")
+    _validate_feed_candles(candles, now)
+    return quote_time, bid, ask, candles, "Binance USDⓈ-M Futures", BINANCE_GOLD_SYMBOL, "Gold perpetual quote; may differ from broker XAUUSD"
 
 
 async def _load_biquote_market():
-    tick, m1_payload, m5_payload, m15_payload = await asyncio.gather(
+    """Load a timestamped broker-style XAUUSD quote and closed MTF candles."""
+    tick, *payloads = await asyncio.gather(
         asyncio.to_thread(_fetch_biquote_json, "/api/XAUUSD", {"allowStale": "false"}),
-        asyncio.to_thread(_fetch_biquote_json, "/api/XAUUSD/ohlc", {"interval": "1m", "limit": 120}),
-        asyncio.to_thread(_fetch_biquote_json, "/api/XAUUSD/ohlc", {"interval": "5m", "limit": 80}),
-        asyncio.to_thread(_fetch_biquote_json, "/api/XAUUSD/ohlc", {"interval": "15m", "limit": 80}),
+        *[
+            asyncio.to_thread(_fetch_biquote_json, "/api/XAUUSD/ohlc", {"interval": interval, "limit": 80})
+            for interval in ("1m", "5m", "15m", "30m", "1h", "4h", "1d")
+        ],
     )
     now = datetime.now(timezone.utc)
     bid, ask = float(tick["bid"]), float(tick["ask"])
-    quote_time = tick.get("timestamp") or tick.get("lastQuoteAt")
-    if not quote_time:
+    quote_time_raw = tick.get("timestamp") or tick.get("lastQuoteAt")
+    if not quote_time_raw:
         raise ValueError("BiQuote tick has no timestamp")
-    quote_dt = datetime.fromisoformat(quote_time.replace("Z", "+00:00")).astimezone(timezone.utc)
-    quote_age = max(0.0, (now - quote_dt).total_seconds())
-    if tick.get("stale", True) or quote_age > 180 or tick.get("marketState") != "open":
-        raise ValueError(f"BiQuote quote is stale or market is not open (age={quote_age:.0f}s)")
-    candles = {
-        "M1": _to_biquote_candles(m1_payload, 100),
-        "M5": _to_biquote_candles(m5_payload, 60),
-        "M15": _to_biquote_candles(m15_payload, 60),
-    }
-    if any(len(candles[tf]) < 2 for tf in candles) or bid <= 0 or ask < bid:
-        raise ValueError("BiQuote returned incomplete or invalid gold market data")
-    latest = datetime.fromisoformat(candles["M1"][-1].time)
-    if (now - latest).total_seconds() > 180:
-        raise ValueError("BiQuote gold candles are stale")
-    return now, bid, ask, candles, "BiQuote broker XAUUSD feed", "XAUUSD", "Broker-feed spot quote; verify it matches your broker"
+    quote_time = datetime.fromisoformat(quote_time_raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+    quote_age = (now - quote_time).total_seconds()
+    if quote_age < -5 or quote_age > MAX_QUOTE_AGE_SECONDS or tick.get("stale", True) or tick.get("marketState") != "open":
+        raise ValueError(f"BiQuote quote is stale or market is not open (age={quote_age:.1f}s)")
+    intervals = ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
+    candles = {tf: _to_biquote_candles(payload, 60) for tf, payload in zip(intervals, payloads)}
+    if not (bid > 0 and ask >= bid):
+        raise ValueError("BiQuote returned invalid bid/ask")
+    _validate_feed_candles(candles, now)
+    return quote_time, bid, ask, candles, "BiQuote broker XAUUSD feed", "XAUUSD", "Broker-feed spot quote; verify it matches your broker"
 
 
 async def _binance_gold_feed_loop() -> None:
@@ -892,6 +924,21 @@ async def generate_signal(req: SignalRequest):
     logger.info(f"   Timeframes: {tf_summary}")
     logger.info(f"   ATR: {req.atr}")
     logger.info(f"   Model: {OPENAI_MODEL}")
+
+    # 0. Hard data-quality gate: quote timestamp, price geometry, and required timeframes.
+    try:
+        quote_time = datetime.fromisoformat(req.server_time_utc.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (TypeError, ValueError, AttributeError):
+        return _publish_veto(req, "invalid_or_missing_quote_timestamp")
+    quote_age = (datetime.now(timezone.utc) - quote_time).total_seconds()
+    if quote_age < -5 or quote_age > MAX_QUOTE_AGE_SECONDS:
+        return _publish_veto(req, f"stale_market_quote:{quote_age:.1f}s")
+    if not (math.isfinite(req.bid) and math.isfinite(req.ask) and req.bid > 0 and req.ask >= req.bid and req.point > 0):
+        return _publish_veto(req, "invalid_bid_ask_or_point")
+    try:
+        _validate_feed_candles(req.candles, datetime.now(timezone.utc))
+    except (ValueError, TypeError, OverflowError) as exc:
+        return _publish_veto(req, f"invalid_market_candles:{str(exc)[:100]}")
 
     # 1. Compute ATR if not provided
     atr_value = req.atr if req.atr is not None else compute_atr(req.candles)
