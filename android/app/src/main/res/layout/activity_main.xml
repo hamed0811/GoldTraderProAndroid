@@ -2,6 +2,7 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#0B0D10" android:fillViewport="true">
 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
     <TextView android:id="@+id/title" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="GOLDTRADER PRO" android:textColor="#D6B45A" android:textSize="22sp" android:textStyle="bold" android:gravity="right"/>
+    <Button android:id="@+id/aiSettings" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="تنظیمات اتصال هوش مصنوعی / API" android:textAllCaps="false" android:layout_marginTop="10dp"/>
     <TextView android:id="@+id/health" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="● CONNECTING" android:textColor="#A9B0B8" android:textSize="13sp" android:gravity="right" android:paddingTop="4dp"/>
     <TextView android:id="@+id/price" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="NO DATA" android:textColor="#F1F3F5" android:textSize="34sp" android:textStyle="bold" android:gravity="right" android:paddingTop="24dp"/>
     <TextView android:id="@+id/signal" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="WAIT — منتظر داده معتبر" android:textColor="#A9B0B8" android:textSize="18sp" android:gravity="right" android:paddingTop="12dp"/>
