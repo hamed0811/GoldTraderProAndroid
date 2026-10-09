@@ -98,11 +98,14 @@ string BuildRequest()
    double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
    int spread=(int)MathRound((tick.ask-tick.bid)/point);
 
+   string utc=TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS);
+   StringReplace(utc,".","-");
+   StringReplace(utc," ","T");
    string j="{";
    j+="\"account_id\":\"signal-only\",";
    j+="\"symbol\":\""+JsonEscape(_Symbol)+"\",";
    j+="\"timeframe\":\""+TfName(InpPrimaryTF)+"\",";
-   j+="\"server_time_utc\":\""+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+"Z\",";
+   j+="\"server_time_utc\":\""+utc+"Z\",";
    j+="\"bid\":"+JsonNumber(tick.bid,digits)+",";
    j+="\"ask\":"+JsonNumber(tick.ask,digits)+",";
    j+="\"spread_points\":"+IntegerToString(spread)+",";
@@ -114,7 +117,8 @@ string BuildRequest()
    j+="\"M15\":"+BuildCandlesJson(PERIOD_M15)+",";
    j+="\"M30\":"+BuildCandlesJson(PERIOD_M30)+",";
    j+="\"H1\":"+BuildCandlesJson(PERIOD_H1)+",";
-   j+="\"H4\":"+BuildCandlesJson(PERIOD_H4);
+   j+="\"H4\":"+BuildCandlesJson(PERIOD_H4)+",";
+   j+="\"D1\":"+BuildCandlesJson(PERIOD_D1);
    j+="},";
    j+="\"atr\":"+DoubleToString(CalculateATR(InpPrimaryTF),8)+",";
    j+="\"constraints\":{";
