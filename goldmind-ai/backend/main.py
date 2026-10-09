@@ -346,13 +346,13 @@ class SignalResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 def compute_atr(candles: dict[str, list[CandleData]], period: int = 14) -> float:
-    """Compute Average True Range from candle list (defaults to H1 or M15)."""
-    # Pick a timeframe to calculate ATR, prefer H1, else M15, else the first available
+    """Compute ATR using the short-horizon M5 series first, then M1/M15/H1."""
+    # The primary use case is a signal for roughly the next 10 minutes.
     tf_to_use = None
-    if "H1" in candles and candles["H1"]:
-        tf_to_use = "H1"
-    elif "M15" in candles and candles["M15"]:
-        tf_to_use = "M15"
+    for preferred_tf in ("M5", "M1", "M15", "H1"):
+        if preferred_tf in candles and candles[preferred_tf]:
+            tf_to_use = preferred_tf
+            break
     elif candles:
         tf_to_use = list(candles.keys())[0]
         
@@ -657,10 +657,10 @@ Before making your decision, mentally perform these analysis steps:
    - buy_stop: SL < entry (e.g. entry - 1.5×ATR)
    - sell_stop: SL > entry (e.g. entry + 1.5×ATR)
 4. TP placement — use your best technical judgement:
-   - R:R benchmark from settings: {req.constraints.min_rr} (reference only, NOT a hard rule)
-   - Place TP at the level that makes the most sense technically (key S/R, Fib extensions, ATR targets, etc.)
-   - You may use a HIGHER or LOWER R:R than {req.constraints.min_rr} if the chart structure supports it
-   - The goal is the best risk-adjusted trade, not a fixed R:R ratio
+   - Minimum risk/reward from settings: {req.constraints.min_rr}; this is enforced by the server and is a hard gate.
+   - Place TP at a technical level that meets the minimum R:R (key S/R, ATR target, etc.).
+   - If no realistic target meets the minimum R:R, return WAIT.
+   - The goal is the best risk-adjusted trade, not a forced setup
 5. expiry_minutes should normally be {req.constraints.expiry_minutes} minutes because the target is a short-horizon signal.
 6. Provide a short comment (max 30 chars) describing the setup.
 7. If spread ({req.spread_points} pts) > max allowed ({req.constraints.max_spread_points} pts),
@@ -670,10 +670,9 @@ Before making your decision, mentally perform these analysis steps:
 9. symbol = "{req.symbol}". timestamp_utc = current UTC time in ISO-8601.
 
 ═══ CONFIDENCE GUIDE ═══
-- 0.80–1.00: Strong conviction — clear trend, key level breakout, good session, multiple confirming factors.
-- 0.60–0.79: Moderate conviction — decent setup but some uncertainty. Still a viable trade.
-- 0.40–0.59: Weak setup — acceptable if you want to test a level, but consider vetoing if conditions are extremely poor.
-- Below 0.40: Veto. Do not trade.
+- 0.75–1.00: Candidate only; server independently requires at least 4 of 5 M5/M15/H1/H4/D1 trends to align.
+- Below 0.75: Veto. Do not propose an entry.
+- Model confidence is not a measured win rate; final displayed score is calculated from timeframe confluence.
 
 Respond ONLY with valid JSON matching the required schema. No extra text."""
 
@@ -988,7 +987,7 @@ async def generate_signal(req: SignalRequest):
     quote_age = (datetime.now(timezone.utc) - quote_time).total_seconds()
     if quote_age < -5 or quote_age > MAX_QUOTE_AGE_SECONDS:
         return _publish_veto(req, f"stale_market_quote:{quote_age:.1f}s")
-    if not (math.isfinite(req.bid) and math.isfinite(req.ask) and req.bid > 0 and req.ask >= req.bid and req.point > 0):
+    if not (math.isfinite(req.bid) and math.isfinite(req.ask) and math.isfinite(req.point) and req.bid > 0 and req.ask >= req.bid and req.point > 0 and req.spread_points >= 0):
         return _publish_veto(req, "invalid_bid_ask_or_point")
     try:
         _validate_feed_candles(req.candles, datetime.now(timezone.utc))
@@ -1006,8 +1005,8 @@ async def generate_signal(req: SignalRequest):
     if not req.candles or sum(len(v) for v in req.candles.values()) < 30:
         logger.warning("   🚫 VETO: insufficient market data")
         return _publish_veto(req, "insufficient_data")
-    if atr_value <= 0:
-        logger.warning("   🚫 VETO: ATR unavailable")
+    if not math.isfinite(atr_value) or atr_value <= 0:
+        logger.warning("   🚫 VETO: ATR unavailable or invalid")
         return _publish_veto(req, "atr_unavailable")
 
     # 3. Quick spread veto (server-side too, belt-and-suspenders)
