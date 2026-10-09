@@ -353,7 +353,7 @@ def compute_atr(candles: dict[str, list[CandleData]], period: int = 14) -> float
         if preferred_tf in candles and candles[preferred_tf]:
             tf_to_use = preferred_tf
             break
-    elif candles:
+    if not tf_to_use and candles:
         tf_to_use = list(candles.keys())[0]
         
     if not tf_to_use or len(candles[tf_to_use]) < 2:
