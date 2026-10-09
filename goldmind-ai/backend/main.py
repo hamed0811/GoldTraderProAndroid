@@ -363,6 +363,13 @@ def veto_response(symbol: str, reason: str) -> SignalResponse:
     )
 
 
+def _publish_veto(req: "SignalRequest", reason: str) -> SignalResponse:
+    """Publish a safe WAIT state to mobile for every rejected/failed signal request."""
+    signal = veto_response(req.symbol, reason)
+    _publish_mobile_state(req, signal)
+    return signal
+
+
 # ---------------------------------------------------------------------------
 # Build the JSON schema dict for OpenAI Structured Outputs
 # ---------------------------------------------------------------------------
@@ -697,21 +704,24 @@ async def generate_signal(req: SignalRequest):
     sym = req.symbol.upper().replace(".", "").replace("_", "").replace("-", "")
     if "XAUUSD" not in sym and "GOLD" not in sym:
         logger.warning(f"   🚫 VETO: unsupported symbol {req.symbol}; XAUUSD/GOLD only")
-        return veto_response(req.symbol, "unsupported_symbol")
+        return _publish_veto(req, "unsupported_symbol")
     if not req.candles or sum(len(v) for v in req.candles.values()) < 30:
         logger.warning("   🚫 VETO: insufficient market data")
-        return veto_response(req.symbol, "insufficient_data")
+        return _publish_veto(req, "insufficient_data")
     if atr_value <= 0:
         logger.warning("   🚫 VETO: ATR unavailable")
-        return veto_response(req.symbol, "atr_unavailable")
+        return _publish_veto(req, "atr_unavailable")
 
     # 3. Quick spread veto (server-side too, belt-and-suspenders)
     if req.spread_points > req.constraints.max_spread_points:
         logger.warning(f"   🚫 VETO: Spread {req.spread_points} > max {req.constraints.max_spread_points}")
         logger.info("─" * 60)
-        return veto_response(req.symbol, f"spread {req.spread_points} > max {req.constraints.max_spread_points}")
+        return _publish_veto(req, f"spread {req.spread_points} > max {req.constraints.max_spread_points}")
 
     # 4. Call OpenAI with Structured Outputs (with fallback)
+    if not OPENAI_API_KEY:
+        logger.error("OPENAI_API_KEY is not configured; returning safe WAIT state")
+        return _publish_veto(req, "model_unavailable: OPENAI_API_KEY not configured")
     client = AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=60.0)
     models_to_try = [OPENAI_MODEL]
     if FALLBACK_MODEL and FALLBACK_MODEL != OPENAI_MODEL:
@@ -780,7 +790,7 @@ async def generate_signal(req: SignalRequest):
                 signal.order.expiry_minutes = 0
             elif not valid:
                 logger.warning("   🚫 VETO: invalid signal geometry returned by model")
-                return veto_response(req.symbol, "invalid_signal_geometry")
+                return _publish_veto(req, "invalid_signal_geometry")
 
             # --- Log R:R for info (no auto-correction, use AI's original TP) ---
             if not signal.veto and signal.order.type.value != "none":
@@ -826,7 +836,7 @@ async def generate_signal(req: SignalRequest):
     logger.error(f"   ❌ All models failed. Last error: {last_error}")
     traceback.print_exc()
     logger.info("─" * 60)
-    return veto_response(req.symbol, "model_unavailable")
+    return _publish_veto(req, "model_unavailable")
 
 
 # ---------------------------------------------------------------------------
