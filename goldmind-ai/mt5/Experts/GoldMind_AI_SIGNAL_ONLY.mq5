@@ -55,7 +55,8 @@ string BuildCandlesJson(ENUM_TIMEFRAMES tf)
    string out="[";
    int digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
    int utcOffset=(int)(TimeCurrent()-TimeGMT());
-   for(int i=n-1;i>=0;i--)
+   // Skip rates[0], which is the still-forming candle; analyze closed bars only.
+   for(int i=n-1;i>=1;i--)
    {
       if(StringLen(out)>1) out+=",";
       out+="{";
