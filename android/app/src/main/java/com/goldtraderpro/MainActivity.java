@@ -198,7 +198,7 @@ public class MainActivity extends Activity {
         client.newCall(request).enqueue(new Callback(){
             public void onFailure(Call call,java.io.IOException e){
                 // Do not leave an old price or signal on screen as if it were live.
-                set(price, "XAUUSD\\nNO DATA");
+                set(price, "XAUUSD\nNO DATA");
                 clearSignal("WAIT — اتصال قطع است؛ داده قبلی معتبر نیست");
                 if(isCloudBase()){
                     ui("● CLOUD OFFLINE / RETRYING");
@@ -216,7 +216,7 @@ public class MainActivity extends Activity {
                         parse(response.body().string());
                         schedulePoll(5000);
                     } else if(isCloudBase()) {
-                        set(price, "XAUUSD\\nNO DATA");
+                        set(price, "XAUUSD\nNO DATA");
                         clearSignal("WAIT — سرور پاسخ معتبر نداد");
                         ui("● CLOUD HTTP "+response.code()+" / RETRYING");
                         schedulePoll(5000);
