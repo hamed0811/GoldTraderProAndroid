@@ -54,11 +54,16 @@ string BuildCandlesJson(ENUM_TIMEFRAMES tf)
 
    string out="[";
    int digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
+   int utcOffset=(int)(TimeCurrent()-TimeGMT());
    for(int i=n-1;i>=0;i--)
    {
       if(StringLen(out)>1) out+=",";
       out+="{";
-      out+="\"time\":\""+TimeToString(rates[i].time,TIME_DATE|TIME_SECONDS)+"Z\",";
+      datetime barUtc=rates[i].time-utcOffset;
+      string barTime=TimeToString(barUtc,TIME_DATE|TIME_SECONDS);
+      StringReplace(barTime,".","-");
+      StringReplace(barTime," ","T");
+      out+="\"time\":\""+barTime+"Z\",";
       out+="\"open\":"+JsonNumber(rates[i].open,digits)+",";
       out+="\"high\":"+JsonNumber(rates[i].high,digits)+",";
       out+="\"low\":"+JsonNumber(rates[i].low,digits)+",";
@@ -98,7 +103,9 @@ string BuildRequest()
    double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
    int spread=(int)MathRound((tick.ask-tick.bid)/point);
 
-   string utc=TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS);
+   int utcOffset=(int)(TimeCurrent()-TimeGMT());
+   datetime quoteUtc=tick.time-utcOffset;
+   string utc=TimeToString(quoteUtc,TIME_DATE|TIME_SECONDS);
    StringReplace(utc,".","-");
    StringReplace(utc," ","T");
    string j="{";
