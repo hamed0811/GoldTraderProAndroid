@@ -618,12 +618,13 @@ def _engine_only_signal(req: SignalRequest, atr_value: float) -> Optional[Signal
     prior = m1[-6:-1]
     last_three = [c.close for c in m1[-3:]]
     buffer = max(0.10 * atr_value, 2.0 * req.point, req.spread_points * req.point)
+    breakout_margin = max(0.05 * atr_value, 2.0 * req.point)
     score = max(bull_votes, bear_votes) / 5.0
 
     if direction == "bullish":
         prior_level = max(c.high for c in prior)
         rising = last_three[0] < last_three[1] < last_three[2]
-        if not rising or m1[-1].close <= prior_level:
+        if not rising or m1[-1].close <= prior_level + breakout_margin:
             return None
         entry = max(prior_level + buffer, req.ask + buffer)
         if entry - req.ask > 0.75 * atr_value:
@@ -634,7 +635,7 @@ def _engine_only_signal(req: SignalRequest, atr_value: float) -> Optional[Signal
     else:
         prior_level = min(c.low for c in prior)
         falling = last_three[0] > last_three[1] > last_three[2]
-        if not falling or m1[-1].close >= prior_level:
+        if not falling or m1[-1].close >= prior_level - breakout_margin:
             return None
         entry = min(prior_level - buffer, req.bid - buffer)
         if req.bid - entry > 0.75 * atr_value:
