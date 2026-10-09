@@ -1104,7 +1104,7 @@ async def generate_signal(req: SignalRequest):
     last_error = None
     for model in models_to_try:
         try:
-            is_fallback = model != OPENAI_MODEL
+            is_fallback = model != models_to_try[0]
             if is_fallback:
                 logger.warning(f"   🔄 Falling back to {model}...")
             else:
@@ -1223,11 +1223,26 @@ async def generate_signal(req: SignalRequest):
                 logger.info(f"   ↪ Will try fallback model...")
             continue
 
-    # All models failed
-    logger.error(f"   ❌ All models failed. Last error: {last_error}")
+    # All configured AI models failed: use the deterministic fallback only if it independently passes every gate.
+    logger.error(f"   ❌ All {selected_provider} models failed. Last error: {last_error}")
     traceback.print_exc()
+    logger.info("   Trying deterministic ENGINE_ONLY fallback")
+    try:
+        request_quote_time = datetime.fromisoformat(req.server_time_utc.replace("Z", "+00:00")).astimezone(timezone.utc)
+        quote_still_fresh = (datetime.now(timezone.utc) - request_quote_time).total_seconds() <= MAX_QUOTE_AGE_SECONDS
+    except (TypeError, ValueError, AttributeError):
+        quote_still_fresh = False
+    engine_signal = _engine_only_signal(req, atr_value) if quote_still_fresh else None
+    if engine_signal is not None:
+        _publish_mobile_state(req, engine_signal)
+        sent = send_telegram_signal(engine_signal)
+        if sent:
+            logger.info(f"   📲 Telegram: ENGINE_ONLY fallback sent to {sent} chat(s)")
+        logger.info("   ENGINE_ONLY fallback accepted; no order execution is available")
+        return engine_signal
+    logger.info("   ENGINE_ONLY did not find a validated setup; returning WAIT")
     logger.info("─" * 60)
-    return _publish_veto(req, "model_unavailable")
+    return _publish_veto(req, "AI_unavailable_and_ENGINE_ONLY_has_no_valid_setup")
 
 
 # ---------------------------------------------------------------------------
