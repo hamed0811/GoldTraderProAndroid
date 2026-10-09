@@ -803,16 +803,37 @@ async def _binance_gold_feed_loop() -> None:
             _ACTIVE_MARKET_SOURCE = source
             _ACTIVE_SOURCE_SYMBOL = source_symbol
             _ACTIVE_SOURCE_NOTE = source_note
+            latest_open = candles["M1"][-1].time
+            is_new_candle = latest_open != last_analyzed_open
+
+            # Preserve the last completed signal between feed polls within the same
+            # one-minute candle. Previously every 15-second poll reset signal=None,
+            # so Android almost always saw a price but no signal.
+            previous_signal = _latest_mobile_state.get("signal")
+            if is_new_candle:
+                published_signal = None
+            else:
+                published_signal = previous_signal
+                if published_signal:
+                    try:
+                        signal_time = datetime.fromisoformat(
+                            published_signal.get("timestamp_utc", "").replace("Z", "+00:00")
+                        ).astimezone(timezone.utc)
+                        signal_age = (now - signal_time).total_seconds()
+                        if signal_age > 120 or signal_age < -30:
+                            published_signal = None
+                    except (TypeError, ValueError):
+                        published_signal = None
+
             _latest_mobile_state.clear()
             _latest_mobile_state.update({
-                "price": f"{bid:.2f}", "symbol": "XAUUSD", "signal": None,
+                "price": f"{bid:.2f}", "symbol": "XAUUSD", "signal": published_signal,
                 "protection": {"mode": "OFF"}, "source": source,
                 "source_symbol": source_symbol, "updated_at_utc": now.isoformat(),
                 "data_status": "LIVE", "note": source_note,
             })
 
-            latest_open = candles["M1"][-1].time
-            if latest_open != last_analyzed_open:
+            if is_new_candle:
                 last_analyzed_open = latest_open
                 spread_points = max(0, round((ask - bid) / BINANCE_POINT))
                 req = SignalRequest(
