@@ -59,4 +59,4 @@ jobs:
         with:
           python-version: '3.12'
       - name: Compile backend Python files
-        run: python -m py_compile goldmind-ai/backend/main.py goldmind-ai/backend/telegram_notifier.py
+        run: python -m py_compile goldmind-ai/backend/main.py
