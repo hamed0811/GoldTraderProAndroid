@@ -69,7 +69,8 @@ def test_rejects_invalid_ohlc_geometry():
 def test_rejects_stale_minute_data():
     now = datetime.now(timezone.utc)
     candles = valid_mtf(now)
-    candles["M1"][-1].time = (now - timedelta(minutes=10)).isoformat()
+    for candle in candles["M1"]:
+        candle.time = (datetime.fromisoformat(candle.time) - timedelta(minutes=10)).isoformat()
     with pytest.raises(ValueError, match="M1 last closed candle is stale"):
         main._validate_feed_candles(candles, now)
 
