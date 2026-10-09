@@ -91,6 +91,29 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.2")
 FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gpt-5")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+AI_PROVIDER = os.getenv("AI_PROVIDER", "auto").strip().lower()
+
+
+def _get_ai_config():
+    """Choose a configured provider without exposing its credential."""
+    if AI_PROVIDER == "gemini" or (AI_PROVIDER == "auto" and GEMINI_API_KEY):
+        if not GEMINI_API_KEY:
+            return None, "gemini", []
+        return AsyncOpenAI(
+            api_key=GEMINI_API_KEY,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            timeout=60.0,
+        ), "gemini", [GEMINI_MODEL]
+    if AI_PROVIDER == "openai" or (AI_PROVIDER == "auto" and OPENAI_API_KEY):
+        if not OPENAI_API_KEY:
+            return None, "openai", []
+        models = [OPENAI_MODEL]
+        if FALLBACK_MODEL and FALLBACK_MODEL != OPENAI_MODEL:
+            models.append(FALLBACK_MODEL)
+        return AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=60.0), "openai", models
+    return None, AI_PROVIDER, []
 
 app = FastAPI(title="GoldMind AI Signal Backend", version="1.0.0")
 
@@ -226,13 +249,14 @@ app.add_middleware(RequestResponseLogger)
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_banner():
-    key_preview = OPENAI_API_KEY[:8] + "..." + OPENAI_API_KEY[-4:] if len(OPENAI_API_KEY) > 12 else "NOT SET"
+    _, configured_provider, configured_models = _get_ai_config()
     logger.info("")
     logger.info("=" * 60)
     logger.info("  GoldMind AI Signal Backend")
     logger.info("=" * 60)
-    logger.info(f"  Model:    {OPENAI_MODEL} (fallback: {FALLBACK_MODEL})")
-    logger.info(f"  API Key:  {key_preview}")
+    logger.info(f"  AI Provider: {configured_provider}; configured: {bool(configured_models)}")
+    if configured_models:
+        logger.info(f"  AI Model: {configured_models[0]}")
     logger.info(f"  Server:   http://127.0.0.1:8000")
     logger.info(f"  Health:   http://127.0.0.1:8000/health")
     logger.info(f"  Signal:   http://127.0.0.1:8000/signal  (POST)")
@@ -683,7 +707,7 @@ BINANCE_POINT = 0.01
 BIQUOTE_BASE = "https://biquote.io"
 MAX_QUOTE_AGE_SECONDS = 15
 REQUIRED_TIMEFRAMES = {"M1": 30, "M5": 30, "M15": 30, "M30": 30, "H1": 20, "H4": 20, "D1": 20}
-TIMEFRAME_MAX_AGE_SECONDS = {"M1": 125, "M5": 615, "M15": 1815, "M30": 3615, "H1": 7215, "H4": 28815, "D1": 172815}
+TIMEFRAME_MAX_AGE_SECONDS = {"M1": 125, "M5": 615, "M15": 1815, "M30": 7215, "H1": 64815, "H4": 259215, "D1": 432015}
 _ACTIVE_MARKET_SOURCE = "Binance USDⓈ-M Futures"
 _ACTIVE_SOURCE_SYMBOL = BINANCE_GOLD_SYMBOL
 _ACTIVE_SOURCE_NOTE = "Gold perpetual quote; may differ from broker XAUUSD"
@@ -961,14 +985,11 @@ async def generate_signal(req: SignalRequest):
         logger.info("─" * 60)
         return _publish_veto(req, f"spread {req.spread_points} > max {req.constraints.max_spread_points}")
 
-    # 4. Call OpenAI with Structured Outputs (with fallback)
-    if not OPENAI_API_KEY:
-        logger.error("OPENAI_API_KEY is not configured; returning safe WAIT state")
-        return _publish_veto(req, "model_unavailable: OPENAI_API_KEY not configured")
-    client = AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=60.0)
-    models_to_try = [OPENAI_MODEL]
-    if FALLBACK_MODEL and FALLBACK_MODEL != OPENAI_MODEL:
-        models_to_try.append(FALLBACK_MODEL)
+    # 4. Call the configured AI provider with structured JSON output.
+    client, selected_provider, models_to_try = _get_ai_config()
+    if not client or not models_to_try:
+        logger.warning("No AI provider credential configured; returning safe WAIT state")
+        return _publish_veto(req, "model_unavailable: configure a free Gemini API key or a supported provider")
 
     messages = [
         {"role": "system", "content": build_system_prompt(req, atr_value)},
@@ -982,7 +1003,7 @@ async def generate_signal(req: SignalRequest):
             if is_fallback:
                 logger.warning(f"   🔄 Falling back to {model}...")
             else:
-                logger.info(f"   ⏳ Calling OpenAI ({model})...")
+                logger.info(f"   ⏳ Calling {selected_provider} ({model})...")
             sys.stdout.flush()
             start_time = time.time()
 
@@ -1070,7 +1091,7 @@ async def generate_signal(req: SignalRequest):
 
         except Exception as e:
             last_error = e
-            logger.error(f"   ❌ {model} failed: {e}")
+            logger.error(f"   ❌ {selected_provider} model {model} failed: {e}")
             if not is_fallback and len(models_to_try) > 1:
                 logger.info(f"   ↪ Will try fallback model...")
             continue
