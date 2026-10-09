@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'android/**'
+      - 'goldmind-ai/backend/**'
       - '.github/workflows/android-apk.yml'
 
 permissions:
@@ -49,3 +50,13 @@ jobs:
         run: |
           TAG="v1.2.4"
           gh release create "$TAG"             "android/app/build/outputs/apk/release/app-release.apk"             --repo "${{ github.repository }}"             --title "GoldTrader Pro Android v1.2.4"             --notes "Installable Android release APK. Automatic order execution is disabled."             --target "${{ github.sha }}"
+
+  backend-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile backend Python files
+        run: python -m py_compile goldmind-ai/backend/main.py goldmind-ai/backend/telegram_notifier.py
