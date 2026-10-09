@@ -30,12 +30,6 @@ import openai
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
-try:
-    from telegram_notifier import start as start_telegram, send_signal as send_telegram_signal
-except Exception:
-    start_telegram = lambda: False
-    send_telegram_signal = lambda signal: 0
-
 # ---------------------------------------------------------------------------
 # Force unbuffered stdout so prints appear immediately in PowerShell
 # ---------------------------------------------------------------------------
@@ -265,10 +259,6 @@ async def startup_banner():
     logger.info("=" * 60)
     _start_mobile_discovery()
     asyncio.create_task(_binance_gold_feed_loop())
-    if start_telegram():
-        logger.info("  Telegram signal notifier: ENABLED")
-    else:
-        logger.info("  Telegram signal notifier: disabled (token not configured)")
     logger.info("")
 
 # ---------------------------------------------------------------------------
@@ -1090,9 +1080,6 @@ async def generate_signal(req: SignalRequest):
         if engine_signal is None:
             return _publish_veto(req, "ENGINE_ONLY: no validated 10-minute breakout; WAIT")
         _publish_mobile_state(req, engine_signal)
-        sent = send_telegram_signal(engine_signal)
-        if sent:
-            logger.info(f"   📲 Telegram: ENGINE_ONLY signal sent to {sent} chat(s)")
         logger.info("   ENGINE_ONLY signal accepted; no order execution is available")
         return engine_signal
 
@@ -1204,9 +1191,6 @@ async def generate_signal(req: SignalRequest):
             logger.info("─" * 60)
 
             _publish_mobile_state(req, signal)
-            sent = send_telegram_signal(signal)
-            if sent:
-                logger.info(f"   📲 Telegram: signal sent to {sent} chat(s)")
             return signal
 
         except (openai.APITimeoutError, asyncio.TimeoutError) as e:
@@ -1235,9 +1219,6 @@ async def generate_signal(req: SignalRequest):
     engine_signal = _engine_only_signal(req, atr_value) if quote_still_fresh else None
     if engine_signal is not None:
         _publish_mobile_state(req, engine_signal)
-        sent = send_telegram_signal(engine_signal)
-        if sent:
-            logger.info(f"   📲 Telegram: ENGINE_ONLY fallback sent to {sent} chat(s)")
         logger.info("   ENGINE_ONLY fallback accepted; no order execution is available")
         return engine_signal
     logger.info("   ENGINE_ONLY did not find a validated setup; returning WAIT")
