@@ -1,6 +1,22 @@
 package com.goldtraderpro;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.SharedPreferences;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+import android.text.InputType;
+import android.util.Base64;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.Toast;
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+import java.security.KeyStore;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.os.Bundle;
@@ -30,6 +46,9 @@ public class MainActivity extends Activity {
     private final OkHttpClient client = new OkHttpClient.Builder().retryOnConnectionFailure(true).build();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private TextView health, price, signal, entry, sl, tp, reasons, protection, server;
+    private Button aiSettingsButton;
+    private static final String AI_PREFS = "goldtrader_ai_settings";
+    private static final String AI_KEY_ALIAS = "GoldTraderProApiKeyV1";
     private String base = null;
     private boolean discovering = false;
     private boolean pollScheduled = false;
@@ -46,6 +65,8 @@ public class MainActivity extends Activity {
         reasons=findViewById(R.id.reasons);
         protection=findViewById(R.id.protection);
         server=findViewById(R.id.server);
+        aiSettingsButton=findViewById(R.id.aiSettings);
+        aiSettingsButton.setOnClickListener(v -> showAiSettings());
         base=CLOUD_BASE;
         server.setText("Server: Cloud "+base);
         createChannels();
@@ -291,6 +312,109 @@ public class MainActivity extends Activity {
             clearSignal("WAIT — پاسخ سرور قابل‌اعتماد نیست");
             ui("● BAD DATA");
         }
+    }
+
+
+    // API configuration is prepared for a future server-side provider connection.
+    // The app does not send this key anywhere in this version.
+    private void showAiSettings() {
+        SharedPreferences prefs = getSharedPreferences(AI_PREFS, MODE_PRIVATE);
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int)(16 * getResources().getDisplayMetrics().density);
+        form.setPadding(pad, pad / 2, pad, 0);
+
+        EditText provider = field("ارائه‌دهنده (مثلاً OpenAI، Gemini یا سازگار با OpenAI)");
+        provider.setText(prefs.getString("provider", ""));
+        form.addView(provider);
+
+        EditText endpoint = field("آدرس API / Base URL");
+        endpoint.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        endpoint.setText(prefs.getString("endpoint", ""));
+        form.addView(endpoint);
+
+        EditText model = field("نام مدل");
+        model.setText(prefs.getString("model", ""));
+        form.addView(model);
+
+        EditText apiKey = field("API Key");
+        apiKey.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        try {
+            String encrypted = prefs.getString("api_key_enc", "");
+            if (!encrypted.isEmpty()) apiKey.setText(decryptApiKey(encrypted));
+        } catch (Exception e) {
+            Toast.makeText(this, "کلید ذخیره‌شده قابل خواندن نیست؛ لطفاً دوباره وارد کنید", Toast.LENGTH_LONG).show();
+        }
+        form.addView(apiKey);
+
+        new AlertDialog.Builder(this)
+            .setTitle("تنظیمات اتصال هوش مصنوعی")
+            .setMessage("این بخش برای اتصال آینده آماده شده است. در نسخه فعلی، تنظیمات فقط ذخیره می‌شوند و API فراخوانی نمی‌شود.")
+            .setView(form)
+            .setPositiveButton("ذخیره", (dialog, which) -> {
+                try {
+                    SharedPreferences.Editor edit = prefs.edit()
+                        .putString("provider", provider.getText().toString().trim())
+                        .putString("endpoint", endpoint.getText().toString().trim())
+                        .putString("model", model.getText().toString().trim());
+                    String key = apiKey.getText().toString();
+                    if (!key.isEmpty()) edit.putString("api_key_enc", encryptApiKey(key));
+                    edit.apply();
+                    Toast.makeText(this, "تنظیمات روی همین دستگاه ذخیره شد؛ اتصال هنوز فعال نیست", Toast.LENGTH_LONG).show();
+                } catch (Exception e) {
+                    Toast.makeText(this, "ذخیره امن API Key انجام نشد", Toast.LENGTH_LONG).show();
+                }
+            })
+            .setNegativeButton("انصراف", null)
+            .setNeutralButton("پاک‌کردن API Key", (dialog, which) -> {
+                prefs.edit().remove("api_key_enc").apply();
+                Toast.makeText(this, "API Key ذخیره‌شده پاک شد", Toast.LENGTH_SHORT).show();
+            })
+            .show();
+    }
+
+    private EditText field(String hint) {
+        EditText edit = new EditText(this);
+        edit.setSingleLine(true);
+        edit.setHint(hint);
+        edit.setTextSize(14);
+        return edit;
+    }
+
+    private SecretKey getApiEncryptionKey() throws Exception {
+        KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
+        keyStore.load(null);
+        java.security.Key existing = keyStore.getKey(AI_KEY_ALIAS, null);
+        if (existing instanceof SecretKey) return (SecretKey) existing;
+        KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+        generator.init(new KeyGenParameterSpec.Builder(AI_KEY_ALIAS,
+            KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setRandomizedEncryptionRequired(true)
+            .build());
+        return generator.generateKey();
+    }
+
+    private String encryptApiKey(String plainText) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, getApiEncryptionKey());
+        byte[] encrypted = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
+        byte[] iv = cipher.getIV();
+        byte[] combined = new byte[iv.length + encrypted.length];
+        System.arraycopy(iv, 0, combined, 0, iv.length);
+        System.arraycopy(encrypted, 0, combined, iv.length, encrypted.length);
+        return Base64.encodeToString(combined, Base64.NO_WRAP);
+    }
+
+    private String decryptApiKey(String encoded) throws Exception {
+        byte[] combined = Base64.decode(encoded, Base64.NO_WRAP);
+        if (combined.length <= 12) throw new IllegalArgumentException("Invalid encrypted API key");
+        byte[] iv = java.util.Arrays.copyOfRange(combined, 0, 12);
+        byte[] encrypted = java.util.Arrays.copyOfRange(combined, 12, combined.length);
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, getApiEncryptionKey(), new GCMParameterSpec(128, iv));
+        return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
     }
 
     private void set(TextView v,String s){runOnUiThread(()->v.setText(s));}
