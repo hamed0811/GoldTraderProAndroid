@@ -902,7 +902,7 @@ Set these environment variables on the existing Render web service (never commit
 - `GEMINI_API_KEY` = API key created in Google AI Studio
 - `GEMINI_MODEL=gemini-2.5-flash` (default)
 
-The backend uses Google's OpenAI-compatible endpoint for structured JSON responses. Free-tier availability and request limits depend on the Google account, region, model, and current quota. Until the key is configured and a live response passes validation, the API deliberately returns WAIT.
+The backend uses Google's OpenAI-compatible endpoint for structured JSON responses. Free-tier availability and request limits depend on the Google account, region, model, and current quota. Gemini is optional: when no provider key is configured, the server runs the deterministic ENGINE_ONLY fallback and emits a signal only if fresh data, a closed-candle breakout, at least 4-of-5 aligned M5/M15/H1/H4/D1 trends, valid levels, and minimum risk/reward all pass. Otherwise it returns WAIT.
 
 ### Data and signal acceptance rules
 
