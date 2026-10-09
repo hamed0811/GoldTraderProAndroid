@@ -31,6 +31,7 @@ public class MainActivity extends Activity {
     private TextView health, price, signal, entry, sl, tp, reasons, protection, server;
     private String base = null;
     private boolean discovering = false;
+    private boolean pollScheduled = false;
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
@@ -175,6 +176,15 @@ public class MainActivity extends Activity {
             }
         }catch(Exception ignored){}
         return null;
+    }
+
+    private void schedulePoll(long delayMs){
+        if(pollScheduled) return;
+        pollScheduled=true;
+        handler.postDelayed(() -> {
+            pollScheduled=false;
+            poll();
+        }, delayMs);
     }
 
     private boolean isCloudBase(){
