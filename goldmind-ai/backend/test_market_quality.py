@@ -86,3 +86,47 @@ def test_multi_timeframe_alignment_is_deterministic():
     direction, bulls, bears, _ = main._timeframe_alignment(bearish)
     assert direction == "bearish"
     assert bears == 5 and bulls == 0
+
+
+def make_request(candles, now):
+    return main.SignalRequest(
+        symbol="XAUUSD",
+        timeframe="M5",
+        server_time_utc=now.isoformat(),
+        bid=2406.35,
+        ask=2406.40,
+        spread_points=5,
+        digits=2,
+        point=0.01,
+        candles=candles,
+        atr=main.compute_atr(candles),
+        constraints=main.Constraints(max_spread_points=50, min_rr=1.5, expiry_minutes=10),
+    )
+
+
+def test_engine_only_emits_only_a_valid_aligned_breakout():
+    now = datetime.now(timezone.utc)
+    candles = valid_mtf(now, direction=1)
+    prior_high = max(c.high for c in candles["M1"][-6:-1])
+    last = candles["M1"][-1]
+    last.close = prior_high + 0.5
+    last.open = last.close - 0.1
+    last.high = last.close + 0.1
+    last.low = last.close - 0.2
+
+    req = make_request(candles, now)
+    signal = main._engine_only_signal(req, main.compute_atr(candles))
+    assert signal is not None
+    assert signal.order.type == main.OrderTypeEnum.buy_stop
+    assert signal.order.entry > req.ask
+    assert signal.order.sl < signal.order.entry < signal.order.tp
+    assert abs(signal.order.tp - signal.order.entry) / abs(signal.order.entry - signal.order.sl) >= 1.5
+    assert signal.confidence >= 0.8
+    assert "ENGINE_ONLY" in signal.order.comment
+
+
+def test_engine_only_returns_wait_without_a_breakout():
+    now = datetime.now(timezone.utc)
+    candles = valid_mtf(now, direction=1)
+    req = make_request(candles, now)
+    assert main._engine_only_signal(req, main.compute_atr(candles)) is None
