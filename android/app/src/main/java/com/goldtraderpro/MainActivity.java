@@ -233,8 +233,8 @@ public class MainActivity extends Activity {
         });
     }
 
-    private static final long MAX_DATA_AGE_MS = 90_000L;
-    private static final long MAX_FUTURE_SKEW_MS = 30_000L;
+    private static final long MAX_DATA_AGE_MS = 15_000L;
+    private static final long MAX_FUTURE_SKEW_MS = 5_000L;
 
     private boolean isFreshLiveData(JSONObject o) {
         String status = o.optString("data_status", "");
