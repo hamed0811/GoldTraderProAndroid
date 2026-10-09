@@ -234,7 +234,7 @@ public class MainActivity extends Activity {
             String p=o.optString("price","");
             // The price TextView was never updated, so its XML placeholder stayed "No data"
             // even when /api/state returned a valid live cloud price.
-            set(price, p.isEmpty() ? "XAUUSD\\nNo data" : "XAUUSD\\n" + p);
+            set(price, p.isEmpty() ? "XAUUSD\nNo data" : "XAUUSD\n" + p);
             String dataStatus=o.optString("data_status","");
             String source=o.optString("source","");
             if(!p.isEmpty()) {
@@ -246,10 +246,10 @@ public class MainActivity extends Activity {
             set(protection,"Smart Protection: "+(pr==null?"OFF":pr.optString("mode","OFF")));
             if(s==null){
                 setSignal("WAIT — هنوز سیگنال معتبری صادر نشده");
-                set(entry,"ENTRY\\n—");
-                set(sl,"SL\\n—");
-                set(tp,"TP1\\n—");
-                set(reasons,"وضعیت\\nداده قیمت دریافت شد؛ سیگنال موجود نیست");
+                set(entry,"ENTRY\n—");
+                set(sl,"SL\n—");
+                set(tp,"TP1\n—");
+                set(reasons,"وضعیت\nداده قیمت دریافت شد؛ سیگنال موجود نیست");
                 return;
             }
             String state=s.optString("state","WAIT");
@@ -258,8 +258,6 @@ public class MainActivity extends Activity {
             set(sl,"SL\n"+s.optString("sl","—"));
             set(tp,"TP1\n"+s.optString("tp1","—"));
             set(reasons,"دلایل سیگنال\n"+s.optString("reasons","—"));
-            JSONObject pr=o.optJSONObject("protection");
-            set(protection,"Smart Protection: "+(pr==null?"OFF":pr.optString("mode","OFF")));
         }catch(Exception e){
             ui("● BAD DATA");
         }
