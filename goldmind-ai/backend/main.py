@@ -1068,7 +1068,13 @@ async def generate_signal(req: SignalRequest):
             # Parse into our Pydantic model for validation
             signal = SignalResponse.model_validate_json(raw_json)
 
-            # --- FIX Issue 3: Override timestamp with actual server time ---
+            # The model may take long enough for the quote to become stale.
+            # Never publish a signal based on a quote older than the hard freshness limit.
+            request_quote_time = datetime.fromisoformat(req.server_time_utc.replace("Z", "+00:00")).astimezone(timezone.utc)
+            if (datetime.now(timezone.utc) - request_quote_time).total_seconds() > MAX_QUOTE_AGE_SECONDS:
+                return _publish_veto(req, "market_data_became_stale_during_analysis")
+
+            # Stamp the decision time only after confirming the source quote is still fresh.
             signal.timestamp_utc = datetime.now(timezone.utc).isoformat()
 
             # Hard server-side validation: AI output is informational only and never executed.
@@ -1095,13 +1101,16 @@ async def generate_signal(req: SignalRequest):
                 logger.warning("   🚫 VETO: invalid signal geometry returned by model")
                 return _publish_veto(req, "invalid_signal_geometry")
             elif side != "none":
-                if signal.confidence < 0.80:
-                    return _publish_veto(req, f"confidence_below_entry_threshold:{signal.confidence:.2f}")
+                if signal.confidence < 0.75:
+                    return _publish_veto(req, f"model_confidence_below_75:{signal.confidence:.2f}")
                 if signal.bias.value != expected_bias:
                     return _publish_veto(req, "ai_bias_order_side_disagreement")
                 direction, bull_votes, bear_votes, alignment = _timeframe_alignment(req.candles)
                 if direction != expected_bias:
                     return _publish_veto(req, f"multi_timeframe_disagreement:{alignment}")
+                # Display a transparent five-timeframe confluence score, not a claimed win probability.
+                signal.confidence = max(bull_votes, bear_votes) / 5.0
+                signal.order.comment = f"{signal.order.comment[:15]} MTF {max(bull_votes, bear_votes)}/5"
                 entry, sl, tp = levels
                 sl_dist = abs(entry - sl)
                 tp_dist = abs(tp - entry)
