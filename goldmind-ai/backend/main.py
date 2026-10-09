@@ -16,6 +16,7 @@ import traceback
 import socket
 import threading
 import json
+import math
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -90,6 +91,29 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.2")
 FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "gpt-5")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+AI_PROVIDER = os.getenv("AI_PROVIDER", "auto").strip().lower()
+
+
+def _get_ai_config():
+    """Choose a configured provider without exposing its credential."""
+    if AI_PROVIDER == "gemini" or (AI_PROVIDER == "auto" and GEMINI_API_KEY):
+        if not GEMINI_API_KEY:
+            return None, "gemini", []
+        return AsyncOpenAI(
+            api_key=GEMINI_API_KEY,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            timeout=60.0,
+        ), "gemini", [GEMINI_MODEL]
+    if AI_PROVIDER == "openai" or (AI_PROVIDER == "auto" and OPENAI_API_KEY):
+        if not OPENAI_API_KEY:
+            return None, "openai", []
+        models = [OPENAI_MODEL]
+        if FALLBACK_MODEL and FALLBACK_MODEL != OPENAI_MODEL:
+            models.append(FALLBACK_MODEL)
+        return AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=60.0), "openai", models
+    return None, AI_PROVIDER, []
 
 app = FastAPI(title="GoldMind AI Signal Backend", version="1.0.0")
 
@@ -152,7 +176,7 @@ def _publish_mobile_state(req: "SignalRequest", signal: "SignalResponse") -> Non
         "protection": {"mode": "OFF"},
         "source": _ACTIVE_MARKET_SOURCE,
         "source_symbol": _ACTIVE_SOURCE_SYMBOL,
-        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "updated_at_utc": req.server_time_utc,
         "data_status": "LIVE",
         "note": _ACTIVE_SOURCE_NOTE,
     })
@@ -225,13 +249,14 @@ app.add_middleware(RequestResponseLogger)
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_banner():
-    key_preview = OPENAI_API_KEY[:8] + "..." + OPENAI_API_KEY[-4:] if len(OPENAI_API_KEY) > 12 else "NOT SET"
+    _, configured_provider, configured_models = _get_ai_config()
     logger.info("")
     logger.info("=" * 60)
     logger.info("  GoldMind AI Signal Backend")
     logger.info("=" * 60)
-    logger.info(f"  Model:    {OPENAI_MODEL} (fallback: {FALLBACK_MODEL})")
-    logger.info(f"  API Key:  {key_preview}")
+    logger.info(f"  AI Provider: {configured_provider}; configured: {bool(configured_models)}")
+    if configured_models:
+        logger.info(f"  AI Model: {configured_models[0]}")
     logger.info(f"  Server:   http://127.0.0.1:8000")
     logger.info(f"  Health:   http://127.0.0.1:8000/health")
     logger.info(f"  Signal:   http://127.0.0.1:8000/signal  (POST)")
@@ -321,14 +346,14 @@ class SignalResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 def compute_atr(candles: dict[str, list[CandleData]], period: int = 14) -> float:
-    """Compute Average True Range from candle list (defaults to H1 or M15)."""
-    # Pick a timeframe to calculate ATR, prefer H1, else M15, else the first available
+    """Compute ATR using the short-horizon M5 series first, then M1/M15/H1."""
+    # The primary use case is a signal for roughly the next 10 minutes.
     tf_to_use = None
-    if "H1" in candles and candles["H1"]:
-        tf_to_use = "H1"
-    elif "M15" in candles and candles["M15"]:
-        tf_to_use = "M15"
-    elif candles:
+    for preferred_tf in ("M5", "M1", "M15", "H1"):
+        if preferred_tf in candles and candles[preferred_tf]:
+            tf_to_use = preferred_tf
+            break
+    if not tf_to_use and candles:
         tf_to_use = list(candles.keys())[0]
         
     if not tf_to_use or len(candles[tf_to_use]) < 2:
@@ -547,6 +572,104 @@ def get_session_info(utc_time: datetime, symbol: str = "XAUUSD") -> dict:
 # Build system prompt for OpenAI
 # ---------------------------------------------------------------------------
 
+def _timeframe_alignment(candles: dict[str, list[CandleData]]) -> tuple[str, int, int, str]:
+    """Return directional vote counts from M5/M15/H1/H4/D1 closed candles."""
+    bullish = bearish = 0
+    notes = []
+    for tf in ("M5", "M15", "H1", "H4", "D1"):
+        closes = [c.close for c in candles[tf]]
+        if len(closes) < 21:
+            return "neutral", 0, 0, f"{tf}_insufficient_history"
+        prior_window = closes[-21:-1]
+        previous_ema = sum(prior_window) / len(prior_window)
+        alpha = 2.0 / 21.0
+        latest_close = closes[-1]
+        ema = alpha * latest_close + (1.0 - alpha) * previous_ema
+        prior_close = closes[-2]
+        if latest_close > ema and ema > previous_ema and latest_close > prior_close:
+            bullish += 1
+            notes.append(f"{tf}:bull")
+        elif latest_close < ema and ema < previous_ema and latest_close < prior_close:
+            bearish += 1
+            notes.append(f"{tf}:bear")
+        else:
+            notes.append(f"{tf}:mixed")
+    if bullish >= 4:
+        direction = "bullish"
+    elif bearish >= 4:
+        direction = "bearish"
+    else:
+        direction = "neutral"
+    return direction, bullish, bearish, ",".join(notes)
+
+
+def _engine_only_signal(req: SignalRequest, atr_value: float) -> Optional[SignalResponse]:
+    """Deterministic fallback: emit only a fresh M1 breakout aligned with >=4/5 higher TF trends."""
+    if not math.isfinite(atr_value) or atr_value <= 0:
+        return None
+    direction, bull_votes, bear_votes, alignment = _timeframe_alignment(req.candles)
+    m1 = req.candles.get("M1", [])
+    if direction not in ("bullish", "bearish") or len(m1) < 6:
+        return None
+    mid = (req.bid + req.ask) / 2.0
+    if abs(mid - m1[-1].close) > 2.0 * atr_value:
+        return None
+
+    prior = m1[-6:-1]
+    last_three = [c.close for c in m1[-3:]]
+    buffer = max(0.10 * atr_value, 2.0 * req.point, req.spread_points * req.point)
+    breakout_margin = max(0.05 * atr_value, 2.0 * req.point)
+    score = max(bull_votes, bear_votes) / 5.0
+
+    if direction == "bullish":
+        prior_level = max(c.high for c in prior)
+        rising = last_three[0] < last_three[1] < last_three[2]
+        if not rising or m1[-1].close <= prior_level + breakout_margin:
+            return None
+        entry = max(prior_level + buffer, req.ask + buffer)
+        if entry - req.ask > 0.75 * atr_value:
+            return None
+        sl = entry - 1.2 * atr_value
+        tp = entry + 1.8 * atr_value
+        bias, order_type = BiasEnum.bullish, OrderTypeEnum.buy_stop
+    else:
+        prior_level = min(c.low for c in prior)
+        falling = last_three[0] > last_three[1] > last_three[2]
+        if not falling or m1[-1].close >= prior_level - breakout_margin:
+            return None
+        entry = min(prior_level - buffer, req.bid - buffer)
+        if req.bid - entry > 0.75 * atr_value:
+            return None
+        sl = entry + 1.2 * atr_value
+        tp = entry - 1.8 * atr_value
+        bias, order_type = BiasEnum.bearish, OrderTypeEnum.sell_stop
+
+    digits = max(0, min(int(req.digits), 8))
+    entry, sl, tp = (round(value, digits) for value in (entry, sl, tp))
+    if min(entry, sl, tp) <= 0:
+        return None
+    risk = abs(entry - sl)
+    reward = abs(tp - entry)
+    if risk <= 0 or reward / risk < req.constraints.min_rr:
+        return None
+    return SignalResponse(
+        symbol=req.symbol,
+        timestamp_utc=datetime.now(timezone.utc).isoformat(),
+        bias=bias,
+        order=OrderResponse(
+            type=order_type,
+            entry=entry,
+            sl=sl,
+            tp=tp,
+            expiry_minutes=10,
+            comment=f"ENGINE_ONLY MTF {max(bull_votes, bear_votes)}/5 breakout",
+        ),
+        confidence=score,
+        veto=False,
+        veto_reason="",
+    )
+
+
 def build_system_prompt(req: SignalRequest, atr_value: float) -> str:
     now_utc = datetime.now(timezone.utc)
     session = get_session_info(now_utc, req.symbol)
@@ -601,10 +724,10 @@ Before making your decision, mentally perform these analysis steps:
    - buy_stop: SL < entry (e.g. entry - 1.5×ATR)
    - sell_stop: SL > entry (e.g. entry + 1.5×ATR)
 4. TP placement — use your best technical judgement:
-   - R:R benchmark from settings: {req.constraints.min_rr} (reference only, NOT a hard rule)
-   - Place TP at the level that makes the most sense technically (key S/R, Fib extensions, ATR targets, etc.)
-   - You may use a HIGHER or LOWER R:R than {req.constraints.min_rr} if the chart structure supports it
-   - The goal is the best risk-adjusted trade, not a fixed R:R ratio
+   - Minimum risk/reward from settings: {req.constraints.min_rr}; this is enforced by the server and is a hard gate.
+   - Place TP at a technical level that meets the minimum R:R (key S/R, ATR target, etc.).
+   - If no realistic target meets the minimum R:R, return WAIT.
+   - The goal is the best risk-adjusted trade, not a forced setup
 5. expiry_minutes should normally be {req.constraints.expiry_minutes} minutes because the target is a short-horizon signal.
 6. Provide a short comment (max 30 chars) describing the setup.
 7. If spread ({req.spread_points} pts) > max allowed ({req.constraints.max_spread_points} pts),
@@ -614,10 +737,9 @@ Before making your decision, mentally perform these analysis steps:
 9. symbol = "{req.symbol}". timestamp_utc = current UTC time in ISO-8601.
 
 ═══ CONFIDENCE GUIDE ═══
-- 0.80–1.00: Strong conviction — clear trend, key level breakout, good session, multiple confirming factors.
-- 0.60–0.79: Moderate conviction — decent setup but some uncertainty. Still a viable trade.
-- 0.40–0.59: Weak setup — acceptable if you want to test a level, but consider vetoing if conditions are extremely poor.
-- Below 0.40: Veto. Do not trade.
+- 0.75–1.00: Candidate only; server independently requires at least 4 of 5 M5/M15/H1/H4/D1 trends to align.
+- Below 0.75: Veto. Do not propose an entry.
+- Model confidence is not a measured win rate; final displayed score is calculated from timeframe confluence.
 
 Respond ONLY with valid JSON matching the required schema. No extra text."""
 
@@ -680,6 +802,9 @@ BINANCE_FAPI_BASE = "https://fapi.binance.com"
 BINANCE_GOLD_SYMBOL = "XAUUSDT"
 BINANCE_POINT = 0.01
 BIQUOTE_BASE = "https://biquote.io"
+MAX_QUOTE_AGE_SECONDS = 15
+REQUIRED_TIMEFRAMES = {"M1": 30, "M5": 30, "M15": 30, "M30": 30, "H1": 21, "H4": 21, "D1": 21}
+TIMEFRAME_MAX_AGE_SECONDS = {"M1": 125, "M5": 615, "M15": 1815, "M30": 7215, "H1": 64815, "H4": 259215, "D1": 432015}
 _ACTIVE_MARKET_SOURCE = "Binance USDⓈ-M Futures"
 _ACTIVE_SOURCE_SYMBOL = BINANCE_GOLD_SYMBOL
 _ACTIVE_SOURCE_NOTE = "Gold perpetual quote; may differ from broker XAUUSD"
@@ -735,55 +860,83 @@ def _to_biquote_candles(payload: dict, limit: int) -> list[CandleData]:
     return result[-limit:]
 
 
+def _validate_feed_candles(candles: dict[str, list[CandleData]], now: datetime) -> None:
+    """Reject incomplete, malformed, out-of-order, or stale closed-candle series."""
+    for tf, minimum in REQUIRED_TIMEFRAMES.items():
+        series = candles.get(tf, [])
+        if len(series) < minimum:
+            raise ValueError(f"{tf} has insufficient closed candles ({len(series)} < {minimum})")
+        parsed_times = []
+        for candle in series:
+            values = (candle.open, candle.high, candle.low, candle.close, candle.volume)
+            if not all(math.isfinite(value) for value in values):
+                raise ValueError(f"{tf} contains non-finite candle values")
+            if min(candle.open, candle.high, candle.low, candle.close) <= 0:
+                raise ValueError(f"{tf} contains non-positive OHLC values")
+            if candle.high < max(candle.open, candle.close, candle.low) or candle.low > min(candle.open, candle.close, candle.high):
+                raise ValueError(f"{tf} contains invalid OHLC geometry")
+            candle_time = datetime.fromisoformat(candle.time.replace("Z", "+00:00")).astimezone(timezone.utc)
+            if candle_time > now + timedelta(seconds=5):
+                raise ValueError(f"{tf} contains a future candle")
+            parsed_times.append(candle_time)
+        if parsed_times != sorted(parsed_times) or len(set(parsed_times)) != len(parsed_times):
+            raise ValueError(f"{tf} candles are not strictly chronological")
+        age = (now - parsed_times[-1]).total_seconds()
+        if age < -5 or age > TIMEFRAME_MAX_AGE_SECONDS[tf]:
+            raise ValueError(f"{tf} last closed candle is stale (age={age:.1f}s)")
+
+
 async def _load_binance_market():
-    book, m1_rows, m5_rows, m15_rows = await asyncio.gather(
+    """Load timestamped Binance gold data and closed candles across all required timeframes."""
+    book, trades, *rows_by_tf = await asyncio.gather(
         asyncio.to_thread(_fetch_binance_json, "/fapi/v1/ticker/bookTicker", {"symbol": BINANCE_GOLD_SYMBOL}),
-        asyncio.to_thread(_fetch_binance_json, "/fapi/v1/klines", {"symbol": BINANCE_GOLD_SYMBOL, "interval": "1m", "limit": 120}),
-        asyncio.to_thread(_fetch_binance_json, "/fapi/v1/klines", {"symbol": BINANCE_GOLD_SYMBOL, "interval": "5m", "limit": 80}),
-        asyncio.to_thread(_fetch_binance_json, "/fapi/v1/klines", {"symbol": BINANCE_GOLD_SYMBOL, "interval": "15m", "limit": 80}),
+        asyncio.to_thread(_fetch_binance_json, "/fapi/v1/aggTrades", {"symbol": BINANCE_GOLD_SYMBOL, "limit": 1}),
+        *[
+            asyncio.to_thread(_fetch_binance_json, "/fapi/v1/klines", {"symbol": BINANCE_GOLD_SYMBOL, "interval": interval, "limit": limit})
+            for interval, limit in (("1m", 120), ("5m", 80), ("15m", 80), ("30m", 80), ("1h", 80), ("4h", 80), ("1d", 80))
+        ],
     )
     now = datetime.now(timezone.utc)
+    if not isinstance(trades, list) or not trades:
+        raise ValueError("Binance has no timestamped recent gold trade")
+    trade_ms = int(trades[-1].get("T", 0))
+    quote_time = datetime.fromtimestamp(trade_ms / 1000, tz=timezone.utc)
+    quote_age = (now - quote_time).total_seconds()
+    if quote_age < -5 or quote_age > MAX_QUOTE_AGE_SECONDS:
+        raise ValueError(f"Binance last trade is stale or future-dated (age={quote_age:.1f}s)")
     bid, ask = float(book["bidPrice"]), float(book["askPrice"])
-    candles = {
-        "M1": _to_candles(m1_rows, int(now.timestamp() * 1000), 100),
-        "M5": _to_candles(m5_rows, int(now.timestamp() * 1000), 60),
-        "M15": _to_candles(m15_rows, int(now.timestamp() * 1000), 60),
-    }
-    if any(not candles[tf] for tf in candles) or bid <= 0 or ask < bid:
-        raise ValueError("Binance returned incomplete or invalid gold market data")
-    latest = datetime.fromisoformat(candles["M1"][-1].time)
-    if (now - latest).total_seconds() > 180:
-        raise ValueError("Binance gold candles are stale")
-    return now, bid, ask, candles, "Binance USDⓈ-M Futures", BINANCE_GOLD_SYMBOL, "Gold perpetual quote; may differ from broker XAUUSD"
+    intervals = ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
+    candles = {tf: _to_candles(rows, int(now.timestamp() * 1000), 60) for tf, rows in zip(intervals, rows_by_tf)}
+    if not (bid > 0 and ask >= bid):
+        raise ValueError("Binance returned invalid bid/ask")
+    _validate_feed_candles(candles, now)
+    return quote_time, bid, ask, candles, "Binance USDⓈ-M Futures", BINANCE_GOLD_SYMBOL, "Gold perpetual quote; may differ from broker XAUUSD"
 
 
 async def _load_biquote_market():
-    tick, m1_payload, m5_payload, m15_payload = await asyncio.gather(
+    """Load a timestamped broker-style XAUUSD quote and closed MTF candles."""
+    tick, *payloads = await asyncio.gather(
         asyncio.to_thread(_fetch_biquote_json, "/api/XAUUSD", {"allowStale": "false"}),
-        asyncio.to_thread(_fetch_biquote_json, "/api/XAUUSD/ohlc", {"interval": "1m", "limit": 120}),
-        asyncio.to_thread(_fetch_biquote_json, "/api/XAUUSD/ohlc", {"interval": "5m", "limit": 80}),
-        asyncio.to_thread(_fetch_biquote_json, "/api/XAUUSD/ohlc", {"interval": "15m", "limit": 80}),
+        *[
+            asyncio.to_thread(_fetch_biquote_json, "/api/XAUUSD/ohlc", {"interval": interval, "limit": 80})
+            for interval in ("1m", "5m", "15m", "30m", "1h", "4h", "1d")
+        ],
     )
     now = datetime.now(timezone.utc)
     bid, ask = float(tick["bid"]), float(tick["ask"])
-    quote_time = tick.get("timestamp") or tick.get("lastQuoteAt")
-    if not quote_time:
+    quote_time_raw = tick.get("timestamp") or tick.get("lastQuoteAt")
+    if not quote_time_raw:
         raise ValueError("BiQuote tick has no timestamp")
-    quote_dt = datetime.fromisoformat(quote_time.replace("Z", "+00:00")).astimezone(timezone.utc)
-    quote_age = max(0.0, (now - quote_dt).total_seconds())
-    if tick.get("stale", True) or quote_age > 180 or tick.get("marketState") != "open":
-        raise ValueError(f"BiQuote quote is stale or market is not open (age={quote_age:.0f}s)")
-    candles = {
-        "M1": _to_biquote_candles(m1_payload, 100),
-        "M5": _to_biquote_candles(m5_payload, 60),
-        "M15": _to_biquote_candles(m15_payload, 60),
-    }
-    if any(len(candles[tf]) < 2 for tf in candles) or bid <= 0 or ask < bid:
-        raise ValueError("BiQuote returned incomplete or invalid gold market data")
-    latest = datetime.fromisoformat(candles["M1"][-1].time)
-    if (now - latest).total_seconds() > 180:
-        raise ValueError("BiQuote gold candles are stale")
-    return now, bid, ask, candles, "BiQuote broker XAUUSD feed", "XAUUSD", "Broker-feed spot quote; verify it matches your broker"
+    quote_time = datetime.fromisoformat(quote_time_raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+    quote_age = (now - quote_time).total_seconds()
+    if quote_age < -5 or quote_age > MAX_QUOTE_AGE_SECONDS or tick.get("stale", True) or tick.get("marketState") != "open":
+        raise ValueError(f"BiQuote quote is stale or market is not open (age={quote_age:.1f}s)")
+    intervals = ("M1", "M5", "M15", "M30", "H1", "H4", "D1")
+    candles = {tf: _to_biquote_candles(payload, 60) for tf, payload in zip(intervals, payloads)}
+    if not (bid > 0 and ask >= bid):
+        raise ValueError("BiQuote returned invalid bid/ask")
+    _validate_feed_candles(candles, now)
+    return quote_time, bid, ask, candles, "BiQuote broker XAUUSD feed", "XAUUSD", "Broker-feed spot quote; verify it matches your broker"
 
 
 async def _binance_gold_feed_loop() -> None:
@@ -803,16 +956,37 @@ async def _binance_gold_feed_loop() -> None:
             _ACTIVE_MARKET_SOURCE = source
             _ACTIVE_SOURCE_SYMBOL = source_symbol
             _ACTIVE_SOURCE_NOTE = source_note
+            latest_open = candles["M1"][-1].time
+            is_new_candle = latest_open != last_analyzed_open
+
+            # Preserve the last completed signal between feed polls within the same
+            # one-minute candle. Previously every 15-second poll reset signal=None,
+            # so Android almost always saw a price but no signal.
+            previous_signal = _latest_mobile_state.get("signal")
+            if is_new_candle:
+                published_signal = None
+            else:
+                published_signal = previous_signal
+                if published_signal:
+                    try:
+                        signal_time = datetime.fromisoformat(
+                            published_signal.get("timestamp_utc", "").replace("Z", "+00:00")
+                        ).astimezone(timezone.utc)
+                        signal_age = (now - signal_time).total_seconds()
+                        if signal_age > 120 or signal_age < -30:
+                            published_signal = None
+                    except (TypeError, ValueError):
+                        published_signal = None
+
             _latest_mobile_state.clear()
             _latest_mobile_state.update({
-                "price": f"{bid:.2f}", "symbol": "XAUUSD", "signal": None,
+                "price": f"{bid:.2f}", "symbol": "XAUUSD", "signal": published_signal,
                 "protection": {"mode": "OFF"}, "source": source,
                 "source_symbol": source_symbol, "updated_at_utc": now.isoformat(),
                 "data_status": "LIVE", "note": source_note,
             })
 
-            latest_open = candles["M1"][-1].time
-            if latest_open != last_analyzed_open:
+            if is_new_candle:
                 last_analyzed_open = latest_open
                 spread_points = max(0, round((ask - bid) / BINANCE_POINT))
                 req = SignalRequest(
@@ -835,7 +1009,7 @@ async def _binance_gold_feed_loop() -> None:
                 "source_symbol": None, "updated_at_utc": datetime.now(timezone.utc).isoformat(),
                 "data_status": "NO_DATA", "note": "Live quote unavailable or stale; no signal",
             })
-        await asyncio.sleep(15)
+        await asyncio.sleep(5)
 
 
 # ---------------------------------------------------------------------------
@@ -872,6 +1046,21 @@ async def generate_signal(req: SignalRequest):
     logger.info(f"   ATR: {req.atr}")
     logger.info(f"   Model: {OPENAI_MODEL}")
 
+    # 0. Hard data-quality gate: quote timestamp, price geometry, and required timeframes.
+    try:
+        quote_time = datetime.fromisoformat(req.server_time_utc.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except (TypeError, ValueError, AttributeError):
+        return _publish_veto(req, "invalid_or_missing_quote_timestamp")
+    quote_age = (datetime.now(timezone.utc) - quote_time).total_seconds()
+    if quote_age < -5 or quote_age > MAX_QUOTE_AGE_SECONDS:
+        return _publish_veto(req, f"stale_market_quote:{quote_age:.1f}s")
+    if not (math.isfinite(req.bid) and math.isfinite(req.ask) and math.isfinite(req.point) and req.bid > 0 and req.ask >= req.bid and req.point > 0 and req.spread_points >= 0):
+        return _publish_veto(req, "invalid_bid_ask_or_point")
+    try:
+        _validate_feed_candles(req.candles, datetime.now(timezone.utc))
+    except (ValueError, TypeError, OverflowError) as exc:
+        return _publish_veto(req, f"invalid_market_candles:{str(exc)[:100]}")
+
     # 1. Compute ATR if not provided
     atr_value = req.atr if req.atr is not None else compute_atr(req.candles)
 
@@ -883,8 +1072,8 @@ async def generate_signal(req: SignalRequest):
     if not req.candles or sum(len(v) for v in req.candles.values()) < 30:
         logger.warning("   🚫 VETO: insufficient market data")
         return _publish_veto(req, "insufficient_data")
-    if atr_value <= 0:
-        logger.warning("   🚫 VETO: ATR unavailable")
+    if not math.isfinite(atr_value) or atr_value <= 0:
+        logger.warning("   🚫 VETO: ATR unavailable or invalid")
         return _publish_veto(req, "atr_unavailable")
 
     # 3. Quick spread veto (server-side too, belt-and-suspenders)
@@ -893,14 +1082,19 @@ async def generate_signal(req: SignalRequest):
         logger.info("─" * 60)
         return _publish_veto(req, f"spread {req.spread_points} > max {req.constraints.max_spread_points}")
 
-    # 4. Call OpenAI with Structured Outputs (with fallback)
-    if not OPENAI_API_KEY:
-        logger.error("OPENAI_API_KEY is not configured; returning safe WAIT state")
-        return _publish_veto(req, "model_unavailable: OPENAI_API_KEY not configured")
-    client = AsyncOpenAI(api_key=OPENAI_API_KEY, timeout=60.0)
-    models_to_try = [OPENAI_MODEL]
-    if FALLBACK_MODEL and FALLBACK_MODEL != OPENAI_MODEL:
-        models_to_try.append(FALLBACK_MODEL)
+    # 4. Call the configured AI provider with structured JSON output.
+    client, selected_provider, models_to_try = _get_ai_config()
+    if not client or not models_to_try:
+        logger.warning("No AI provider credential configured; evaluating deterministic ENGINE_ONLY fallback")
+        engine_signal = _engine_only_signal(req, atr_value)
+        if engine_signal is None:
+            return _publish_veto(req, "ENGINE_ONLY: no validated 10-minute breakout; WAIT")
+        _publish_mobile_state(req, engine_signal)
+        sent = send_telegram_signal(engine_signal)
+        if sent:
+            logger.info(f"   📲 Telegram: ENGINE_ONLY signal sent to {sent} chat(s)")
+        logger.info("   ENGINE_ONLY signal accepted; no order execution is available")
+        return engine_signal
 
     messages = [
         {"role": "system", "content": build_system_prompt(req, atr_value)},
@@ -910,11 +1104,11 @@ async def generate_signal(req: SignalRequest):
     last_error = None
     for model in models_to_try:
         try:
-            is_fallback = model != OPENAI_MODEL
+            is_fallback = model != models_to_try[0]
             if is_fallback:
                 logger.warning(f"   🔄 Falling back to {model}...")
             else:
-                logger.info(f"   ⏳ Calling OpenAI ({model})...")
+                logger.info(f"   ⏳ Calling {selected_provider} ({model})...")
             sys.stdout.flush()
             start_time = time.time()
 
@@ -946,17 +1140,29 @@ async def generate_signal(req: SignalRequest):
             # Parse into our Pydantic model for validation
             signal = SignalResponse.model_validate_json(raw_json)
 
-            # --- FIX Issue 3: Override timestamp with actual server time ---
+            # The model may take long enough for the quote to become stale.
+            # Never publish a signal based on a quote older than the hard freshness limit.
+            request_quote_time = datetime.fromisoformat(req.server_time_utc.replace("Z", "+00:00")).astimezone(timezone.utc)
+            if (datetime.now(timezone.utc) - request_quote_time).total_seconds() > MAX_QUOTE_AGE_SECONDS:
+                return _publish_veto(req, "market_data_became_stale_during_analysis")
+
+            # Stamp the decision time only after confirming the source quote is still fresh.
             signal.timestamp_utc = datetime.now(timezone.utc).isoformat()
 
-            # Hard server-side validation: AI output can never become an executable action.
-            # Invalid geometry is converted to WAIT instead of being passed through.
-            if signal.order.type.value == "buy_stop":
-                valid = signal.order.entry > req.ask and signal.order.sl < signal.order.entry and signal.order.tp > signal.order.entry
-            elif signal.order.type.value == "sell_stop":
-                valid = signal.order.entry < req.bid and signal.order.sl > signal.order.entry and signal.order.tp < signal.order.entry
+            # Hard server-side validation: AI output is informational only and never executed.
+            side = signal.order.type.value
+            if side == "buy_stop":
+                valid = signal.order.entry > req.ask and signal.order.sl < signal.order.entry < signal.order.tp
+                expected_bias = "bullish"
+            elif side == "sell_stop":
+                valid = signal.order.entry < req.bid and signal.order.sl > signal.order.entry > signal.order.tp
+                expected_bias = "bearish"
             else:
                 valid = True
+                expected_bias = "neutral"
+            levels = (signal.order.entry, signal.order.sl, signal.order.tp)
+            if side != "none" and not all(math.isfinite(value) and value > 0 for value in levels):
+                valid = False
             if signal.veto:
                 signal.order.type = OrderTypeEnum.none
                 signal.order.entry = 0.0
@@ -966,16 +1172,26 @@ async def generate_signal(req: SignalRequest):
             elif not valid:
                 logger.warning("   🚫 VETO: invalid signal geometry returned by model")
                 return _publish_veto(req, "invalid_signal_geometry")
-
-            # --- Log R:R for info (no auto-correction, use AI's original TP) ---
-            if not signal.veto and signal.order.type.value != "none":
-                entry = signal.order.entry
-                sl = signal.order.sl
-                tp = signal.order.tp
+            elif side != "none":
+                if signal.confidence < 0.75:
+                    return _publish_veto(req, f"model_confidence_below_75:{signal.confidence:.2f}")
+                if signal.bias.value != expected_bias:
+                    return _publish_veto(req, "ai_bias_order_side_disagreement")
+                direction, bull_votes, bear_votes, alignment = _timeframe_alignment(req.candles)
+                if direction != expected_bias:
+                    return _publish_veto(req, f"multi_timeframe_disagreement:{alignment}")
+                # Display a transparent five-timeframe confluence score, not a claimed win probability.
+                signal.confidence = max(bull_votes, bear_votes) / 5.0
+                signal.order.comment = f"{signal.order.comment[:15]} MTF {max(bull_votes, bear_votes)}/5"
+                entry, sl, tp = levels
                 sl_dist = abs(entry - sl)
                 tp_dist = abs(tp - entry)
                 rr = tp_dist / sl_dist if sl_dist > 0 else 0
-                logger.info(f"   📐 R:R ratio: {rr:.2f} (using AI's original TP)")
+                if sl_dist <= 0 or rr < req.constraints.min_rr:
+                    return _publish_veto(req, f"risk_reward_below_minimum:{rr:.2f}")
+                logger.info(f"   📐 R:R ratio: {rr:.2f}; MTF alignment: {alignment}")
+
+            # No order is submitted; this remains a signal-only display payload.
 
             # Log the result
             if signal.veto:
@@ -1002,16 +1218,31 @@ async def generate_signal(req: SignalRequest):
 
         except Exception as e:
             last_error = e
-            logger.error(f"   ❌ {model} failed: {e}")
+            logger.error(f"   ❌ {selected_provider} model {model} failed: {e}")
             if not is_fallback and len(models_to_try) > 1:
                 logger.info(f"   ↪ Will try fallback model...")
             continue
 
-    # All models failed
-    logger.error(f"   ❌ All models failed. Last error: {last_error}")
+    # All configured AI models failed: use the deterministic fallback only if it independently passes every gate.
+    logger.error(f"   ❌ All {selected_provider} models failed. Last error: {last_error}")
     traceback.print_exc()
+    logger.info("   Trying deterministic ENGINE_ONLY fallback")
+    try:
+        request_quote_time = datetime.fromisoformat(req.server_time_utc.replace("Z", "+00:00")).astimezone(timezone.utc)
+        quote_still_fresh = (datetime.now(timezone.utc) - request_quote_time).total_seconds() <= MAX_QUOTE_AGE_SECONDS
+    except (TypeError, ValueError, AttributeError):
+        quote_still_fresh = False
+    engine_signal = _engine_only_signal(req, atr_value) if quote_still_fresh else None
+    if engine_signal is not None:
+        _publish_mobile_state(req, engine_signal)
+        sent = send_telegram_signal(engine_signal)
+        if sent:
+            logger.info(f"   📲 Telegram: ENGINE_ONLY fallback sent to {sent} chat(s)")
+        logger.info("   ENGINE_ONLY fallback accepted; no order execution is available")
+        return engine_signal
+    logger.info("   ENGINE_ONLY did not find a validated setup; returning WAIT")
     logger.info("─" * 60)
-    return _publish_veto(req, "model_unavailable")
+    return _publish_veto(req, "AI_unavailable_and_ENGINE_ONLY_has_no_valid_setup")
 
 
 # ---------------------------------------------------------------------------

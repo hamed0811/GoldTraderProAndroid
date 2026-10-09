@@ -21,6 +21,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
 
 public class MainActivity extends Activity {
     private static final int DISCOVERY_PORT = 8766;
@@ -196,6 +197,9 @@ public class MainActivity extends Activity {
         Request request=new Request.Builder().url(base+"/api/state").build();
         client.newCall(request).enqueue(new Callback(){
             public void onFailure(Call call,java.io.IOException e){
+                // Do not leave an old price or signal on screen as if it were live.
+                set(price, "XAUUSD\nNO DATA");
+                clearSignal("WAIT — اتصال قطع است؛ داده قبلی معتبر نیست");
                 if(isCloudBase()){
                     ui("● CLOUD OFFLINE / RETRYING");
                     schedulePoll(5000);
@@ -212,6 +216,8 @@ public class MainActivity extends Activity {
                         parse(response.body().string());
                         schedulePoll(5000);
                     } else if(isCloudBase()) {
+                        set(price, "XAUUSD\nNO DATA");
+                        clearSignal("WAIT — سرور پاسخ معتبر نداد");
                         ui("● CLOUD HTTP "+response.code()+" / RETRYING");
                         schedulePoll(5000);
                     } else {
@@ -227,29 +233,51 @@ public class MainActivity extends Activity {
         });
     }
 
+    private static final long MAX_DATA_AGE_MS = 15_000L;
+    private static final long MAX_FUTURE_SKEW_MS = 5_000L;
+
+    private boolean isFreshLiveData(JSONObject o) {
+        String status = o.optString("data_status", "");
+        String timestamp = o.optString("updated_at_utc", "");
+        if (!"LIVE".equalsIgnoreCase(status) || timestamp.isEmpty()) return false;
+        try {
+            long age = System.currentTimeMillis() - OffsetDateTime.parse(timestamp).toInstant().toEpochMilli();
+            return age <= MAX_DATA_AGE_MS && age >= -MAX_FUTURE_SKEW_MS;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void clearSignal(String message) {
+        setSignal(message);
+        set(entry, "ENTRY\n—");
+        set(sl, "SL\n—");
+        set(tp, "TP1\n—");
+        set(reasons, "وضعیت\n" + message);
+    }
+
     private void parse(String raw){
         try{
             JSONObject o=new JSONObject(raw);
             JSONObject s=o.optJSONObject("signal");
             String p=o.optString("price","");
-            // The price TextView was never updated, so its XML placeholder stayed "No data"
-            // even when /api/state returned a valid live cloud price.
-            set(price, p.isEmpty() ? "XAUUSD\nNo data" : "XAUUSD\n" + p);
-            String dataStatus=o.optString("data_status","");
             String source=o.optString("source","");
-            if(!p.isEmpty()) {
-                ui("● LIVE  " + p + (source.isEmpty() ? "" : "  |  " + source));
-            } else {
-                ui("● " + (dataStatus.isEmpty() ? "WAITING FOR DATA" : dataStatus));
-            }
+            String dataStatus=o.optString("data_status","");
             JSONObject pr=o.optJSONObject("protection");
             set(protection,"Smart Protection: "+(pr==null?"OFF":pr.optString("mode","OFF")));
+
+            // Fail closed: a price without a fresh UTC timestamp is never labelled LIVE.
+            if (!isFreshLiveData(o) || p.isEmpty()) {
+                set(price, "XAUUSD\nNO DATA");
+                ui("● " + (dataStatus.isEmpty() ? "NO DATA" : dataStatus) + " / STALE OR UNVERIFIED");
+                clearSignal("WAIT — داده تازه و معتبر در دسترس نیست؛ معامله نکنید");
+                return;
+            }
+
+            set(price, "XAUUSD\n" + p);
+            ui("● LIVE  " + p + (source.isEmpty() ? "" : "  |  " + source));
             if(s==null){
-                setSignal("WAIT — هنوز سیگنال معتبری صادر نشده");
-                set(entry,"ENTRY\n—");
-                set(sl,"SL\n—");
-                set(tp,"TP1\n—");
-                set(reasons,"وضعیت\nداده قیمت دریافت شد؛ سیگنال موجود نیست");
+                clearSignal("WAIT — قیمت دریافت شد؛ سیگنال معتبر موجود نیست");
                 return;
             }
             String state=s.optString("state","WAIT");
@@ -259,6 +287,8 @@ public class MainActivity extends Activity {
             set(tp,"TP1\n"+s.optString("tp1","—"));
             set(reasons,"دلایل سیگنال\n"+s.optString("reasons","—"));
         }catch(Exception e){
+            set(price, "XAUUSD\nNO DATA");
+            clearSignal("WAIT — پاسخ سرور قابل‌اعتماد نیست");
             ui("● BAD DATA");
         }
     }

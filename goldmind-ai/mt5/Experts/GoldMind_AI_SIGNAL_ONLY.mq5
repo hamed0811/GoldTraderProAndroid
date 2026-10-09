@@ -54,11 +54,17 @@ string BuildCandlesJson(ENUM_TIMEFRAMES tf)
 
    string out="[";
    int digits=(int)SymbolInfoInteger(_Symbol,SYMBOL_DIGITS);
-   for(int i=n-1;i>=0;i--)
+   int utcOffset=(int)(TimeCurrent()-TimeGMT());
+   // Skip rates[0], which is the still-forming candle; analyze closed bars only.
+   for(int i=n-1;i>=1;i--)
    {
       if(StringLen(out)>1) out+=",";
       out+="{";
-      out+="\"time\":\""+TimeToString(rates[i].time,TIME_DATE|TIME_SECONDS)+"Z\",";
+      datetime barUtc=rates[i].time-utcOffset;
+      string barTime=TimeToString(barUtc,TIME_DATE|TIME_SECONDS);
+      StringReplace(barTime,".","-");
+      StringReplace(barTime," ","T");
+      out+="\"time\":\""+barTime+"Z\",";
       out+="\"open\":"+JsonNumber(rates[i].open,digits)+",";
       out+="\"high\":"+JsonNumber(rates[i].high,digits)+",";
       out+="\"low\":"+JsonNumber(rates[i].low,digits)+",";
@@ -98,11 +104,16 @@ string BuildRequest()
    double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
    int spread=(int)MathRound((tick.ask-tick.bid)/point);
 
+   int utcOffset=(int)(TimeCurrent()-TimeGMT());
+   datetime quoteUtc=tick.time-utcOffset;
+   string utc=TimeToString(quoteUtc,TIME_DATE|TIME_SECONDS);
+   StringReplace(utc,".","-");
+   StringReplace(utc," ","T");
    string j="{";
    j+="\"account_id\":\"signal-only\",";
    j+="\"symbol\":\""+JsonEscape(_Symbol)+"\",";
    j+="\"timeframe\":\""+TfName(InpPrimaryTF)+"\",";
-   j+="\"server_time_utc\":\""+TimeToString(TimeGMT(),TIME_DATE|TIME_SECONDS)+"Z\",";
+   j+="\"server_time_utc\":\""+utc+"Z\",";
    j+="\"bid\":"+JsonNumber(tick.bid,digits)+",";
    j+="\"ask\":"+JsonNumber(tick.ask,digits)+",";
    j+="\"spread_points\":"+IntegerToString(spread)+",";
@@ -114,7 +125,8 @@ string BuildRequest()
    j+="\"M15\":"+BuildCandlesJson(PERIOD_M15)+",";
    j+="\"M30\":"+BuildCandlesJson(PERIOD_M30)+",";
    j+="\"H1\":"+BuildCandlesJson(PERIOD_H1)+",";
-   j+="\"H4\":"+BuildCandlesJson(PERIOD_H4);
+   j+="\"H4\":"+BuildCandlesJson(PERIOD_H4)+",";
+   j+="\"D1\":"+BuildCandlesJson(PERIOD_D1);
    j+="},";
    j+="\"atr\":"+DoubleToString(CalculateATR(InpPrimaryTF),8)+",";
    j+="\"constraints\":{";
