@@ -15,6 +15,9 @@ import logging
 import traceback
 import socket
 import threading
+import json
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Optional
@@ -147,6 +150,11 @@ def _publish_mobile_state(req: "SignalRequest", signal: "SignalResponse") -> Non
             "veto": signal.veto,
         },
         "protection": {"mode": "OFF"},
+        "source": "Binance USDⓈ-M Futures",
+        "source_symbol": "XAUUSDT",
+        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "data_status": "LIVE",
+        "note": "Gold perpetual quote; may differ from broker XAUUSD",
     })
 
 
@@ -231,6 +239,7 @@ async def startup_banner():
     logger.info("  Waiting for signal requests from MT5 EA...")
     logger.info("=" * 60)
     _start_mobile_discovery()
+    asyncio.create_task(_binance_gold_feed_loop())
     if start_telegram():
         logger.info("  Telegram signal notifier: ENABLED")
     else:
@@ -661,6 +670,125 @@ def build_user_message(req: SignalRequest) -> str:
     lines.append(f"Digits={req.digits} Point={req.point}")
     lines.append("\nAnalyze the market using the framework above and produce the trading signal.")
     return "\n".join(lines)
+
+
+
+# ---------------------------------------------------------------------------
+# Independent Binance gold market-data feed (no MT5 required)
+# ---------------------------------------------------------------------------
+BINANCE_FAPI_BASE = "https://fapi.binance.com"
+BINANCE_GOLD_SYMBOL = "XAUUSDT"
+BINANCE_POINT = 0.01
+
+
+def _fetch_binance_json(path: str, params: dict) -> object:
+    """Fetch public Binance USDⓈ-M Futures market data; no API key is required."""
+    query = urllib.parse.urlencode(params)
+    request = urllib.request.Request(
+        f"{BINANCE_FAPI_BASE}{path}?{query}",
+        headers={"User-Agent": "GoldTraderPro/1.0", "Accept": "application/json"},
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _to_candles(rows: list, now_ms: int, limit: int) -> list[CandleData]:
+    """Convert only closed candles; never analyze a still-forming candle."""
+    closed = [row for row in rows if int(row[6]) < now_ms]
+    result = []
+    for row in closed[-limit:]:
+        result.append(CandleData(
+            time=datetime.fromtimestamp(int(row[0]) / 1000, tz=timezone.utc).isoformat(),
+            open=float(row[1]),
+            high=float(row[2]),
+            low=float(row[3]),
+            close=float(row[4]),
+            volume=float(row[5]),
+        ))
+    return result
+
+
+async def _binance_gold_feed_loop() -> None:
+    """Refresh app state from Binance gold perpetual data and analyze once per new minute."""
+    last_analyzed_open = None
+    logger.info("Binance gold feed starting for XAUUSDT (USDⓈ-M perpetual; not broker XAUUSD)")
+    while True:
+        try:
+            book, m1_rows, m5_rows, m15_rows = await asyncio.gather(
+                asyncio.to_thread(_fetch_binance_json, "/fapi/v1/ticker/bookTicker", {"symbol": BINANCE_GOLD_SYMBOL}),
+                asyncio.to_thread(_fetch_binance_json, "/fapi/v1/klines", {"symbol": BINANCE_GOLD_SYMBOL, "interval": "1m", "limit": 120}),
+                asyncio.to_thread(_fetch_binance_json, "/fapi/v1/klines", {"symbol": BINANCE_GOLD_SYMBOL, "interval": "5m", "limit": 80}),
+                asyncio.to_thread(_fetch_binance_json, "/fapi/v1/klines", {"symbol": BINANCE_GOLD_SYMBOL, "interval": "15m", "limit": 80}),
+            )
+            now = datetime.now(timezone.utc)
+            now_ms = int(now.timestamp() * 1000)
+            bid = float(book["bidPrice"])
+            ask = float(book["askPrice"])
+            m1 = _to_candles(m1_rows, now_ms, 100)
+            m5 = _to_candles(m5_rows, now_ms, 60)
+            m15 = _to_candles(m15_rows, now_ms, 60)
+            candles = {"M1": m1, "M5": m5, "M15": m15}
+
+            if not m1 or not m5 or not m15 or bid <= 0 or ask < bid:
+                raise ValueError("Binance returned incomplete or invalid gold market data")
+
+            latest_closed_ms = int(datetime.fromisoformat(m1[-1].time).timestamp() * 1000)
+            if now_ms - latest_closed_ms > 180_000:
+                raise ValueError("Binance gold candles are stale; refusing to publish a signal")
+
+            # Publish fresh market data immediately, before optional AI analysis.
+            _latest_mobile_state.clear()
+            _latest_mobile_state.update({
+                "price": f"{bid:.2f}",
+                "symbol": "XAUUSD",
+                "signal": None,
+                "protection": {"mode": "OFF"},
+                "source": "Binance USDⓈ-M Futures",
+                "source_symbol": BINANCE_GOLD_SYMBOL,
+                "updated_at_utc": now.isoformat(),
+                "data_status": "LIVE",
+                "note": "Gold perpetual quote; may differ from broker XAUUSD",
+            })
+
+            latest_open = m1[-1].time
+            if latest_open != last_analyzed_open:
+                last_analyzed_open = latest_open
+                spread_points = max(0, round((ask - bid) / BINANCE_POINT))
+                req = SignalRequest(
+                    symbol="XAUUSD",
+                    timeframe="M1",
+                    server_time_utc=now.isoformat(),
+                    bid=bid,
+                    ask=ask,
+                    spread_points=spread_points,
+                    digits=2,
+                    point=BINANCE_POINT,
+                    candles=candles,
+                    atr=compute_atr(candles),
+                    constraints=Constraints(),
+                )
+                logger.info(
+                    "Binance gold data refreshed: bid=%.2f ask=%.2f candles M1=%d M5=%d M15=%d",
+                    bid, ask, len(m1), len(m5), len(m15),
+                )
+                await generate_signal(req)
+
+        except Exception as exc:
+            logger.warning("Binance gold feed unavailable: %s", exc)
+            _latest_mobile_state.clear()
+            _latest_mobile_state.update({
+                "price": "",
+                "symbol": "XAUUSD",
+                "signal": None,
+                "protection": {"mode": "OFF"},
+                "source": "Binance USDⓈ-M Futures",
+                "source_symbol": BINANCE_GOLD_SYMBOL,
+                "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "data_status": "NO_DATA",
+                "note": "Market data unavailable or stale; no signal",
+            })
+        await asyncio.sleep(15)
 
 
 # ---------------------------------------------------------------------------
