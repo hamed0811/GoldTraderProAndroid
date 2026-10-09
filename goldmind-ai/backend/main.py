@@ -154,6 +154,7 @@ def _publish_mobile_state(req: "SignalRequest", signal: "SignalResponse") -> Non
         "source_symbol": "XAUUSDT",
         "updated_at_utc": datetime.now(timezone.utc).isoformat(),
         "data_status": "LIVE",
+        "note": "Gold perpetual quote; may differ from broker XAUUSD",
     })
 
 
@@ -224,7 +225,8 @@ app.add_middleware(RequestResponseLogger)
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_banner():
-    key_preview = OPENAI_API_KEY[:8] + "..." + OPENAI_API_KEY[-4:] if len(OPENAI_API_KEY) > 12 else "NOT SET"    logger.info("")
+    key_preview = OPENAI_API_KEY[:8] + "..." + OPENAI_API_KEY[-4:] if len(OPENAI_API_KEY) > 12 else "NOT SET"
+    logger.info("")
     logger.info("=" * 60)
     logger.info("  GoldMind AI Signal Backend")
     logger.info("=" * 60)
@@ -444,7 +446,8 @@ def classify_instrument(symbol: str) -> dict:
             },
         }
     # --- Silver ---
-    if any(tag in sym for tag in ["XAGUSD", "SILVER"]):        return {
+    if any(tag in sym for tag in ["XAGUSD", "SILVER"]):
+        return {
             "type": "commodity", "name": "silver (XAGUSD)",
             "specialty": "breakout and momentum trading on silver",
             "sessions": {
@@ -663,7 +666,8 @@ def build_user_message(req: SignalRequest) -> str:
             )
         lines.append("")
 
-    lines.append(f"Bid={req.bid} Ask={req.ask} Spread={req.spread_points}pts")    lines.append(f"Digits={req.digits} Point={req.point}")
+    lines.append(f"Bid={req.bid} Ask={req.ask} Spread={req.spread_points}pts")
+    lines.append(f"Digits={req.digits} Point={req.point}")
     lines.append("\nAnalyze the market using the framework above and produce the trading signal.")
     return "\n".join(lines)
 
@@ -706,7 +710,7 @@ def _to_candles(rows: list, now_ms: int, limit: int) -> list[CandleData]:
 
 
 async def _binance_gold_feed_loop() -> None:
-    """Refresh the app state from Binance gold perpetual data and analyze once per new minute."""
+    """Refresh app state from Binance gold perpetual data and analyze once per new minute."""
     last_analyzed_open = None
     logger.info("Binance gold feed starting for XAUUSDT (USDⓈ-M perpetual; not broker XAUUSD)")
     while True:
@@ -729,7 +733,7 @@ async def _binance_gold_feed_loop() -> None:
             if not m1 or not m5 or not m15 or bid <= 0 or ask < bid:
                 raise ValueError("Binance returned incomplete or invalid gold market data")
 
-            latest_closed_ms = int(m1[-1].time and datetime.fromisoformat(m1[-1].time).timestamp() * 1000)
+            latest_closed_ms = int(datetime.fromisoformat(m1[-1].time).timestamp() * 1000)
             if now_ms - latest_closed_ms > 180_000:
                 raise ValueError("Binance gold candles are stale; refusing to publish a signal")
 
