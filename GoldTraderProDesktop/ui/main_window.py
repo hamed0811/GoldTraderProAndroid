@@ -46,7 +46,7 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar.addStretch();toolbar.addWidget(self.clock);m.addLayout(toolbar)
         cards=QtWidgets.QHBoxLayout();self.signal_card=self._card("آخرین تصمیم","انتظار / WAIT");self.indicator_card=self._card("وضعیت تحلیل","در انتظار داده واقعی");self.market_card=self._card("بازار","XAUUSD")
         cards.addWidget(self.signal_card);cards.addWidget(self.indicator_card);cards.addWidget(self.market_card);m.addLayout(cards)
-        self.chart=CandleChart();m.addWidget(self.chart,5)
+        self.chart=CandleChart();self.chart.crosshair_data.connect(self.statusBar().showMessage);m.addWidget(self.chart,5)
         self.rsi_plot=pg.PlotWidget(background='#0d1117');self.rsi_plot.setMaximumHeight(105);self.rsi_plot.setTitle('RSI (14)');self.rsi_plot.showGrid(x=True,y=True,alpha=0.15);self.rsi_plot.setYRange(0,100);m.addWidget(self.rsi_plot)
         self.macd_plot=pg.PlotWidget(background='#0d1117');self.macd_plot.setMaximumHeight(115);self.macd_plot.setTitle('MACD (12,26,9)');self.macd_plot.showGrid(x=True,y=True,alpha=0.15);m.addWidget(self.macd_plot)
         self.stoch_plot=pg.PlotWidget(background='#0d1117');self.stoch_plot.setMaximumHeight(90);self.stoch_plot.setTitle('Stochastic (14,3,3)');self.stoch_plot.setYRange(0,100);self.stoch_plot.showGrid(x=True,y=True,alpha=0.15);m.addWidget(self.stoch_plot)
