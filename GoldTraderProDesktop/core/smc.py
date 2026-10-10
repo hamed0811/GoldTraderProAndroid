@@ -9,6 +9,8 @@ def analyze_smc(df,lookback=15):
     bos="NONE"
     if close[-1]>prev_hi:bos="BULLISH"
     elif close[-1]<prev_lo:bos="BEARISH"
+    prior_mean=float(close[max(0,n-20):n-1].mean());prior_bias="BULLISH" if close[-2]>prior_mean else "BEARISH"
+    choch="BULLISH" if bos=="BULLISH" and prior_bias=="BEARISH" else "BEARISH" if bos=="BEARISH" and prior_bias=="BULLISH" else "NONE"
     fvg=[]
     for i in range(max(2,n-30),n):
         if low[i]>high[i-2]:fvg.append({"side":"BULLISH","low":float(high[i-2]),"high":float(low[i])})
@@ -26,4 +28,4 @@ def analyze_smc(df,lookback=15):
                     if (side=="BULLISH" and close[-1]>=zone["low"]) or (side=="BEARISH" and close[-1]<=zone["high"]):obs.append(zone)
                     break
     mid=(max(high[-50:])+min(low[-50:]))/2
-    return {"bos":bos,"choch":bos,"sweep":sweep,"fvg":fvg[-5:],"order_blocks":obs[-3:],"range_high":float(max(high[-50:])),"range_low":float(min(low[-50:])),"premium_discount":"PREMIUM" if close[-1]>mid else "DISCOUNT"}
+    return {"bos":bos,"choch":"NONE","sweep":sweep,"fvg":fvg[-5:],"order_blocks":obs[-3:],"range_high":float(max(high[-50:])),"range_low":float(min(low[-50:])),"premium_discount":"PREMIUM" if close[-1]>mid else "DISCOUNT"}
