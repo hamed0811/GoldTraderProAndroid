@@ -61,7 +61,6 @@ def init_db() -> None:
 
 @contextmanager
 def db():
-    init_db()
     conn = sqlite3.connect(db_file(), timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=5000")

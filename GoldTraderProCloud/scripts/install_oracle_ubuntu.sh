@@ -30,7 +30,7 @@ fi
 if grep -q 'replace_with_' "$ENV_FILE" || grep -q '^GOLDTRADER_INGEST_TOKEN=$' "$ENV_FILE" || grep -q '^GOLDTRADER_READ_TOKEN=$' "$ENV_FILE"; then
   echo "ERROR: Set real random ingest/read tokens in $ENV_FILE first." >&2; exit 4
 fi
-mkdir -p "$APP_DIR/data"; chmod 700 "$APP_DIR/data"
+mkdir -p "$APP_DIR/data"; sudo chown -R 10001:10001 "$APP_DIR/data"; sudo chmod 700 "$APP_DIR/data"
 echo "Building and starting API (no inbound API port is published)..."
 sudo docker compose -f "$APP_DIR/docker-compose.yml" --project-directory "$APP_DIR" up -d --build api
 sudo docker compose -f "$APP_DIR/docker-compose.yml" --project-directory "$APP_DIR" exec -T api \
