@@ -1,0 +1,42 @@
+name: GoldTraderPro Windows Desktop Build
+on:
+  workflow_dispatch:
+  push:
+    branches: ["rebuild/goldtraderpro-desktop-signal-only"]
+    paths: ["GoldTraderProDesktop/**", ".github/workflows/windows-desktop-build.yml"]
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: GoldTraderProDesktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: "x64"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m compileall -q .
+      - run: python -m pytest -q
+      - name: Build desktop package
+        shell: pwsh
+        run: python -m PyInstaller --noconfirm --windowed --name GoldTraderPro --add-data "config;config" --collect-all pyqtgraph --hidden-import MetaTrader5 main.py
+      - name: Add automatic setup console to packaged app
+        shell: pwsh
+        run: |
+          $bundle = "dist/GoldTraderPro"
+          foreach ($file in @("GoldTraderPro_AutoConsole.bat", "GoldTraderPro_AutoConsole.ps1", "CONSOLE_README_FA.md")) {
+            if (-not (Test-Path -LiteralPath $file)) { throw "Required console file not found: $file" }
+            Copy-Item -LiteralPath $file -Destination $bundle -Force
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $bundle "GoldTraderPro.exe"))) {
+            throw "The packaged executable was not found in $bundle"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GoldTraderPro-Windows-Desktop
+          path: GoldTraderProDesktop/dist/GoldTraderPro/**
+          if-no-files-found: error
+          retention-days: 14

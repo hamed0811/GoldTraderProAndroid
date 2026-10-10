@@ -1,0 +1,41 @@
+name: goldtraderpro-cloud
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: GoldTraderProCloud/Dockerfile
+    image: goldtraderpro-cloud-api:0.1.0
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      GOLDTRADER_DATA_DIR: /data
+      GOLDTRADER_MAX_QUOTE_AGE_SECONDS: "15"
+      LOG_LEVEL: INFO
+    volumes:
+      - ./data:/data
+    expose:
+      - "8000"
+    networks: [goldtrader-private]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["cloudflare"]
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:-}"]
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [goldtrader-private]
+
+networks:
+  goldtrader-private:
+    driver: bridge

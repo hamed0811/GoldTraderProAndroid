@@ -1,0 +1,46 @@
+name: GoldTraderPro Oracle Cloudflare Backend
+on:
+  push:
+    branches: ["rebuild/goldtraderpro-desktop-signal-only"]
+    paths: ["GoldTraderProCloud/**", "GoldTraderProDesktop/core/**", ".github/workflows/cloud-oracle-deploy.yml"]
+  pull_request:
+    paths: ["GoldTraderProCloud/**", "GoldTraderProDesktop/core/**", ".github/workflows/cloud-oracle-deploy.yml"]
+jobs:
+  test-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend test dependencies
+        run: python -m pip install -r GoldTraderProCloud/requirements-dev.txt
+      - name: Validate Oracle install script
+        working-directory: GoldTraderProCloud
+        run: bash -n scripts/install_oracle_ubuntu.sh
+      - name: Syntax validation
+        working-directory: GoldTraderProCloud
+        env:
+          PYTHONPATH: ../GoldTraderProDesktop
+        run: python -m compileall -q app bridge tests
+      - name: API security and data-quality tests
+        working-directory: GoldTraderProCloud
+        env:
+          PYTHONPATH: ../GoldTraderProDesktop
+        run: python -m pytest -q
+      - name: Build deployment ZIP
+        run: |
+          mkdir -p dist/GoldTraderPro-Oracle-Cloudflare/GoldTraderProDesktop
+          cp -a GoldTraderProCloud dist/GoldTraderPro-Oracle-Cloudflare/
+          cp -a GoldTraderProDesktop/core dist/GoldTraderPro-Oracle-Cloudflare/GoldTraderProDesktop/
+          find dist/GoldTraderPro-Oracle-Cloudflare -type d \( -name __pycache__ -o -name .pytest_cache -o -name .venv \) -prune -exec rm -rf {} +
+          find dist/GoldTraderPro-Oracle-Cloudflare -name '*.sqlite3*' -delete
+          rm -f dist/GoldTraderPro-Oracle-Cloudflare/GoldTraderProCloud/.env
+          cd dist
+          zip -qr GoldTraderPro-Oracle-Cloudflare.zip GoldTraderPro-Oracle-Cloudflare
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GoldTraderPro-Oracle-Cloudflare
+          path: dist/GoldTraderPro-Oracle-Cloudflare.zip
+          if-no-files-found: error
+          retention-days: 14
