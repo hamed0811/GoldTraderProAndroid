@@ -23,6 +23,10 @@ CANDLE_COUNTS={"M1":120,"M2":150,"M3":150,"M5":200,"M15":300,"M30":300,"H1":400,
 class NewsWorker(QtCore.QThread):
     finished_data=QtCore.pyqtSignal(object)
     def run(self):self.finished_data.emit(fetch_news())
+class HistoryWorker(QtCore.QThread):
+    finished_data=QtCore.pyqtSignal(object,str)
+    def __init__(self,engine,timeframe):super().__init__();self.engine=engine;self.timeframe=timeframe
+    def run(self):self.finished_data.emit(self.engine.history_days(self.timeframe,365),self.timeframe)
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__();self.setWindowTitle("GoldTrader Pro | تحلیل و سیگنال طلا");self.resize(1480,920);self.setLayoutDirection(QtCore.Qt.LayoutDirection.RightToLeft);self.setStyleSheet(APP_STYLE)
@@ -44,7 +48,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.refresh_btn=QtWidgets.QPushButton("به‌روزرسانی");self.refresh_btn.clicked.connect(self.refresh_market)
         self.back_live=QtWidgets.QPushButton("بازگشت به زنده");self.back_live.clicked.connect(lambda:self.chart.enableAutoRange())
         self.news_btn=QtWidgets.QPushButton("به‌روزرسانی اخبار");self.news_btn.clicked.connect(self.load_news)
-        for w in (QtWidgets.QLabel("تایم‌فریم:"),self.tfbox,self.refresh_btn,self.back_live,self.news_btn):toolbar.addWidget(w)
+        self.year_history_btn=QtWidgets.QPushButton("دریافت تاریخچه یک‌ساله CSV");self.year_history_btn.clicked.connect(self.load_year_history)
+        for w in (QtWidgets.QLabel("تایم‌فریم:"),self.tfbox,self.refresh_btn,self.back_live,self.news_btn,self.year_history_btn):toolbar.addWidget(w)
         toolbar.addStretch();toolbar.addWidget(self.clock);m.addLayout(toolbar)
         cards=QtWidgets.QHBoxLayout();self.signal_card=self._card("آخرین تصمیم","انتظار / WAIT");self.indicator_card=self._card("وضعیت تحلیل","در انتظار داده واقعی");self.market_card=self._card("بازار","XAUUSD")
         cards.addWidget(self.signal_card);cards.addWidget(self.indicator_card);cards.addWidget(self.market_card);m.addLayout(cards)
@@ -119,6 +124,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def export_excel(self):
         try:path=self.logger.export_excel();QtWidgets.QMessageBox.information(self,"خروجی آماده شد",f"فایل Excel ساخته شد:\n{path}")
         except Exception as exc:QtWidgets.QMessageBox.critical(self,"خطا",str(exc))
+    def load_year_history(self):
+        self.year_history_btn.setEnabled(False);self.timer.stop();self.statusBar().showMessage(f"در حال دریافت تاریخچه تا ۳۶۵ روز برای {self.tf} از MT5…")
+        self.history_worker=HistoryWorker(self.engine,self.tf);self.history_worker.finished_data.connect(self.show_year_history);self.history_worker.start()
+    def show_year_history(self,df,timeframe):
+        self.year_history_btn.setEnabled(True);self.timer.start(2500)
+        if df is None or df.empty:self.statusBar().showMessage(self.engine.last_error or "تاریخچه در دسترس نیست؛ NO DATA");return
+        folder=ROOT/"data";folder.mkdir(parents=True,exist_ok=True);path=folder/f"history_{timeframe}_365d.csv";df.to_csv(path,index=False,encoding="utf-8-sig")
+        self.statusBar().showMessage(f"تاریخچه واقعی ذخیره شد: {len(df)} کندل | {path}")
+        QtWidgets.QMessageBox.information(self,"تاریخچه دریافت شد",f"{len(df)} کندل واقعی از MT5 دریافت و ذخیره شد.\n{path}\nداده ساختگی در این فایل وجود ندارد.")
     def load_news(self):
         self.news_btn.setEnabled(False);self.news_status.setText("در حال بررسی RSS؛ در نبود دسترسی، NO DATA نمایش داده می‌شود.")
         self.worker=NewsWorker();self.worker.finished_data.connect(self.show_news);self.worker.start()
