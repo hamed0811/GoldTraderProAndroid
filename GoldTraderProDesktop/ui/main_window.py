@@ -7,7 +7,7 @@ import pandas as pd
 import pyqtgraph as pg
 from PyQt6 import QtCore,QtWidgets
 from core.mt5_engine import MT5Engine
-from core.indicators import ema,rsi,macd
+from core.indicators import ema,rsi,macd,bollinger,stochastic
 from core.analyzer import analyze_market
 from core.signal_engine import build_signal
 from core.signal_logger import SignalLogger
@@ -47,6 +47,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.chart=CandleChart();m.addWidget(self.chart,5)
         self.rsi_plot=pg.PlotWidget(background='#0d1117');self.rsi_plot.setMaximumHeight(105);self.rsi_plot.setTitle('RSI (14)');self.rsi_plot.showGrid(x=True,y=True,alpha=0.15);self.rsi_plot.setYRange(0,100);m.addWidget(self.rsi_plot)
         self.macd_plot=pg.PlotWidget(background='#0d1117');self.macd_plot.setMaximumHeight(115);self.macd_plot.setTitle('MACD (12,26,9)');self.macd_plot.showGrid(x=True,y=True,alpha=0.15);m.addWidget(self.macd_plot)
+        self.stoch_plot=pg.PlotWidget(background='#0d1117');self.stoch_plot.setMaximumHeight(90);self.stoch_plot.setTitle('Stochastic (14,3,3)');self.stoch_plot.setYRange(0,100);self.stoch_plot.showGrid(x=True,y=True,alpha=0.15);m.addWidget(self.stoch_plot)
         lower=QtWidgets.QHBoxLayout();self.reasons=QtWidgets.QListWidget();self.reasons.setMaximumHeight(150);lower.addWidget(self._panel("دلایل تصمیم",self.reasons),3)
         self.pending=QtWidgets.QTableWidget(0,8);self.pending.setHorizontalHeaderLabels(["نوع","سطح","فاصله $","اطمینان","SL","TP1","TP2","منابع"]);self.pending.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch);lower.addWidget(self._panel("سیگنال‌های پیش‌بینی",self.pending),2);m.addLayout(lower)
         self.tabs.addTab(self.monitor,"📊 مانیتور زنده")
@@ -78,9 +79,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.last_signal=build_signal(self.analysis,tick,self.settings)
             key=(self.last_signal.get("action"),round(self.last_signal.get("entry",0),2),self.last_signal["issued_at"][:15])
             if key!=self.last_logged_key:self.logger.append(self.last_signal);self.last_logged_key=key;self.refresh_history_table()
-            close=self.df.close.astype(float).to_numpy();self.chart.set_market_data(self.df,{p:ema(close,p) for p in (9,21,50,200)},self.last_signal)
+            close=self.df.close.astype(float).to_numpy();upper,mid,lower=bollinger(close);ema_lines={p:ema(close,p) for p in (9,21,50,200)};ema_lines['BB верх']=upper;ema_lines['BB низ']=lower
+            self.chart.set_market_data(self.df,ema_lines,self.last_signal,self.analysis.get('levels'))
             rv=rsi(close,14);self.rsi_plot.clear();self.rsi_plot.plot(list(range(len(rv))),rv,pen=pg.mkPen('#a371f7',width=1.4));self.rsi_plot.addLine(y=70,pen=pg.mkPen('#f85149',style=QtCore.Qt.PenStyle.DashLine));self.rsi_plot.addLine(y=30,pen=pg.mkPen('#3fb950',style=QtCore.Qt.PenStyle.DashLine))
             ml,ms,mh=macd(close);self.macd_plot.clear();self.macd_plot.plot(list(range(len(ml))),ml,pen=pg.mkPen('#58a6ff',width=1.2));self.macd_plot.plot(list(range(len(ms))),ms,pen=pg.mkPen('#e3b341',width=1.2));self.macd_plot.addItem(pg.BarGraphItem(x=list(range(len(mh))),height=[0 if v!=v else float(v) for v in mh],width=0.6,brush='#30363d'))
+            sk,sd=stochastic(self.df.high.astype(float).to_numpy(),self.df.low.astype(float).to_numpy(),close);self.stoch_plot.clear();self.stoch_plot.plot(list(range(len(sk))),sk,pen=pg.mkPen('#a371f7',width=1.2));self.stoch_plot.plot(list(range(len(sd))),sd,pen=pg.mkPen('#58a6ff',width=1.2));self.stoch_plot.addLine(y=80,pen=pg.mkPen('#f85149',style=QtCore.Qt.PenStyle.DashLine));self.stoch_plot.addLine(y=20,pen=pg.mkPen('#3fb950',style=QtCore.Qt.PenStyle.DashLine))
             self.signal_card.value_label.setText(self._signal_text(self.last_signal))
             self.indicator_card.value_label.setText(f"امتیاز: {self.analysis.get('score','—')} | RSI: {self.analysis.get('rsi') if self.analysis.get('rsi') is not None else '—'} | ADX: {self.analysis.get('adx') if self.analysis.get('adx') is not None else '—'}")
             self.market_card.value_label.setText(f"نماد: {self.settings['mt5']['symbol']}\nتایم‌فریم: {self.tf} | کندل: {len(self.df)}")
