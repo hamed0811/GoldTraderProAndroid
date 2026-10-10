@@ -48,7 +48,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rsi_plot=pg.PlotWidget(background='#0d1117');self.rsi_plot.setMaximumHeight(105);self.rsi_plot.setTitle('RSI (14)');self.rsi_plot.showGrid(x=True,y=True,alpha=0.15);self.rsi_plot.setYRange(0,100);m.addWidget(self.rsi_plot)
         self.macd_plot=pg.PlotWidget(background='#0d1117');self.macd_plot.setMaximumHeight(115);self.macd_plot.setTitle('MACD (12,26,9)');self.macd_plot.showGrid(x=True,y=True,alpha=0.15);m.addWidget(self.macd_plot)
         lower=QtWidgets.QHBoxLayout();self.reasons=QtWidgets.QListWidget();self.reasons.setMaximumHeight(150);lower.addWidget(self._panel("دلایل تصمیم",self.reasons),3)
-        self.pending=QtWidgets.QTableWidget(0,5);self.pending.setHorizontalHeaderLabels(["نوع","ورود","SL","TP1","TP2"]);self.pending.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch);lower.addWidget(self._panel("سیگنال معتبر فعلی",self.pending),2);m.addLayout(lower)
+        self.pending=QtWidgets.QTableWidget(0,8);self.pending.setHorizontalHeaderLabels(["نوع","سطح","فاصله $","اطمینان","SL","TP1","TP2","منابع"]);self.pending.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch);lower.addWidget(self._panel("سیگنال‌های پیش‌بینی",self.pending),2);m.addLayout(lower)
         self.tabs.addTab(self.monitor,"📊 مانیتور زنده")
         self.history_tab=QtWidgets.QWidget();hl=QtWidgets.QVBoxLayout(self.history_tab);stats=QtWidgets.QHBoxLayout()
         self.history_stats=QtWidgets.QLabel("آمار بر اساس سیگنال‌های ثبت‌شده؛ نتیجه معامله خودکار ثبت نمی‌شود.")
@@ -88,9 +88,10 @@ class MainWindow(QtWidgets.QMainWindow):
             for reason in self.last_signal.get("reasons",[]) if isinstance(self.last_signal.get("reasons",[]),list) else [self.last_signal.get("reason","")]:
                 if reason:self.reasons.addItem(str(reason))
             self.pending.setRowCount(0)
-            if self.last_signal.get("action") in ("BUY","SELL"):
-                self.pending.insertRow(0)
-                for col,val in enumerate([self.last_signal["action"],f"{self.last_signal['entry']:.2f}",f"{self.last_signal['sl']:.2f}",f"{self.last_signal['tp1']:.2f}",f"{self.last_signal['tp2']:.2f}"]):self.pending.setItem(0,col,QtWidgets.QTableWidgetItem(val))
+            for row,item in enumerate(self.last_signal.get("pending",[])):
+                self.pending.insertRow(row)
+                vals=[item["action"],f"{item['level_price']:.2f}",f"{item['distance']:.2f}",f"{item['confidence']}%",f"{item['sl']:.2f}",f"{item['tp1']:.2f}",f"{item['tp2']:.2f}",", ".join(item.get("sources",[]))]
+                for col,val in enumerate(vals):self.pending.setItem(row,col,QtWidgets.QTableWidgetItem(str(val)))
             self.clock.setText("آخرین به‌روزرسانی: "+datetime.now().strftime("%H:%M:%S"));self.statusBar().showMessage("داده واقعی دریافت شد؛ سیگنال‌ها فقط تحلیلی هستند.")
         except Exception as exc:self.statusBar().showMessage(f"خطا در به‌روزرسانی: {exc}")
     def _signal_text(self,s):
