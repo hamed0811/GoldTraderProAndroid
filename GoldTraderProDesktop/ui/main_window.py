@@ -13,6 +13,7 @@ from core.signal_engine import build_signal
 from core.signal_logger import SignalLogger
 from core.news_engine import fetch_news
 from core.risk_manager import RiskManager
+from core.alarm import alert
 from ui.styles import APP_STYLE
 from ui.widgets.candle_chart import CandleChart
 
@@ -80,7 +81,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self.analysis=analyze_market(self.df,df15,df1h,df4h,dfd1,price=tick['bid'])
             self.last_signal=build_signal(self.analysis,tick,self.settings)
             key=(self.last_signal.get("action"),round(self.last_signal.get("entry",0),2),self.last_signal["issued_at"][:15])
-            if key!=self.last_logged_key:self.logger.append(self.last_signal);self.last_logged_key=key;self.refresh_history_table()
+            if key!=self.last_logged_key:
+                self.logger.append(self.last_signal);self.last_logged_key=key;self.refresh_history_table()
+                if self.last_signal.get('action') in ('BUY','SELL'):alert(self.last_signal['action'],self.settings.get('ui',{}).get('sound_alerts',True))
             close=self.df.close.astype(float).to_numpy();upper,mid,lower=bollinger(close);ema_lines={p:ema(close,p) for p in (9,21,50,200)};ema_lines['BB верх']=upper;ema_lines['BB низ']=lower
             self.chart.set_market_data(self.df,ema_lines,self.last_signal,self.analysis.get('levels'))
             rv=rsi(close,14);self.rsi_plot.clear();self.rsi_plot.plot(list(range(len(rv))),rv,pen=pg.mkPen('#a371f7',width=1.4));self.rsi_plot.addLine(y=70,pen=pg.mkPen('#f85149',style=QtCore.Qt.PenStyle.DashLine));self.rsi_plot.addLine(y=30,pen=pg.mkPen('#3fb950',style=QtCore.Qt.PenStyle.DashLine))
