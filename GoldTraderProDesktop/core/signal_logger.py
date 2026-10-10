@@ -40,7 +40,7 @@ class SignalLogger:
                 elif price<=tp2:result="TARGET_2_TOUCHED"
                 elif price<=tp1:result="TARGET_1_TOUCHED"
             if result:
-                row["status"]="CLOSED_BY_PRICE_TOUCH";row["result"]=result;row["closed_at"]=now;row["exit_price"]=price;row["price_move_dollars"]=round(price-float(row["entry"]),2);changed=True
+                row["status"]="CLOSED_BY_PRICE_TOUCH";row["result"]=result;row["closed_at"]=now;row["exit_price"]=price;row["price_move_dollars"]=round((price-float(row["entry"])) if action=="BUY" else (float(row["entry"])-price),2);changed=True
         if changed:self._save(rows)
         return changed
     def export_excel(self,path=None):
@@ -52,7 +52,7 @@ class SignalLogger:
         for cell in ws[1]:cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="243247")
         detail=wb.create_sheet("دلایل");detail.append(["شناسه","نوع","دلایل"])
         for row in rows:detail.append([row.get("id",""),row.get("action","")," | ".join(row.get("reasons",[])) if isinstance(row.get("reasons"),list) else row.get("reason","")])
-        stats=wb.create_sheet("آمار");stats.append(["شاخص","مقدار"]);stats.append(["کل سیگنال‌ها",len(rows)]);stats.append(["خرید",sum(r.get("action")=="BUY" for r in rows)]);stats.append(["فروش",sum(r.get("action")=="SELL" for r in rows)]);stats.append(["انتظار",sum(r.get("action")=="WAIT" for r in rows)]);stats.append(["هدف اول لمس شد",sum(r.get("result")=="TARGET_1_TOUCHED" for r in rows)]);stats.append(["هدف دوم لمس شد",sum(r.get("result")=="TARGET_2_TOUCHED" for r in rows)]);stats.append(["حد ضرر لمس شد",sum(r.get("result")=="STOP_TOUCHED" for r in rows)])
+        stats=wb.create_sheet("آمار");closed=[r for r in rows if r.get("result") in ("TARGET_1_TOUCHED","TARGET_2_TOUCHED","STOP_TOUCHED")];targets=sum(r.get("result") in ("TARGET_1_TOUCHED","TARGET_2_TOUCHED") for r in closed);stats.append(["شاخص","مقدار"]);stats.append(["کل سیگنال‌ها",len(rows)]);stats.append(["خرید",sum(r.get("action")=="BUY" for r in rows)]);stats.append(["فروش",sum(r.get("action")=="SELL" for r in rows)]);stats.append(["انتظار",sum(r.get("action")=="WAIT" for r in rows)]);stats.append(["هدف اول لمس شد",sum(r.get("result")=="TARGET_1_TOUCHED" for r in rows)]);stats.append(["هدف دوم لمس شد",sum(r.get("result")=="TARGET_2_TOUCHED" for r in rows)]);stats.append(["حد ضرر لمس شد",sum(r.get("result")=="STOP_TOUCHED" for r in rows)]);stats.append(["نرخ سیگنال‌های رسیده به هدف (%)",round(100*targets/len(closed),2) if closed else "NO DATA"]);stats.append(["مجموع حرکت جهت‌دار قیمت ($)",round(sum(float(r.get("price_move_dollars",0) or 0) for r in closed),2) if closed else "NO DATA"]);stats.append(["یادداشت","این آمار لمس قیمت است، نه سود/زیان حساب معاملاتی واقعی."])
         for sh in wb.worksheets:
             sh.freeze_panes="A2";sh.auto_filter.ref=sh.dimensions
             for col in sh.columns:
