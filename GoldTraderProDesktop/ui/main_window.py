@@ -19,6 +19,7 @@ from ui.widgets.candle_chart import CandleChart
 
 ROOT=Path(__file__).resolve().parents[1]
 TIMEFRAMES={"۱ دقیقه":"M1","۲ دقیقه":"M2","۳ دقیقه":"M3","۵ دقیقه":"M5","۱۵ دقیقه":"M15","۳۰ دقیقه":"M30","۱ ساعت":"H1","۴ ساعت":"H4","روزانه":"D1"}
+CANDLE_COUNTS={"M1":120,"M2":150,"M3":150,"M5":200,"M15":300,"M30":300,"H1":400,"H4":500,"D1":365}
 class NewsWorker(QtCore.QThread):
     finished_data=QtCore.pyqtSignal(object)
     def run(self):self.finished_data.emit(fetch_news())
@@ -74,7 +75,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tick_data=tick
             if self.logger.track_price(tick['bid']):self.refresh_history_table()
             self.connection.setText("● متصل به MT5");self.price.setText(f"Bid {tick['bid']:.2f}  |  Ask {tick['ask']:.2f}");self.spread.setText(f"اسپرد: {tick['spread']:.2f}")
-            self.df=self.engine.candles(self.tf,500)
+            self.df=self.engine.candles(self.tf,CANDLE_COUNTS.get(self.tf,300))
             if self.df.empty:self.statusBar().showMessage(self.engine.last_error or "کندل موجود نیست");return
             df15=self.df if self.tf=="M15" else self.engine.candles("M15",250)
             df1h=self.engine.candles("H1",250);df4h=self.engine.candles("H4",200);dfd1=self.engine.candles("D1",250)
