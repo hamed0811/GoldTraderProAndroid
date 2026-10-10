@@ -11,8 +11,8 @@ def _pending_levels(analysis,tick,settings):
             if not 6<=distance<=25 or len(set(sources))<2:continue
             confidence=52+min(len(set(sources)),18)
             if 6<=distance<=12:confidence+=8
-            aligned=(action=="BUY" and buy_score>=sell_score) or (action=="SELL" and sell_score>=buy_score)
-            confidence+=10 if aligned else -15;confidence=min(88,confidence)
+            bias="BUY" if buy_score>sell_score else "SELL" if sell_score>buy_score else "NEUTRAL"
+            confidence+=10 if bias==action else -15 if bias in ("BUY","SELL") else 0;confidence=min(88,confidence)
             if confidence<minimum:continue
             sign=1 if action=="BUY" else -1
             candidates.append({"action":action,"level_price":round(value,2),"distance":round(distance,2),"confidence":confidence,"sl":round(value-sign*5,2),"tp1":round(value+sign*5,2),"tp2":round(value+sign*10,2),"sources":sources,"status":"پیش‌بینی؛ نیازمند تأیید قیمت"})
