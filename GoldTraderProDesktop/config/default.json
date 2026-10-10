@@ -1,0 +1,8 @@
+{
+  "mt5": {"symbol":"XAUUSD","auto_reconnect":true,"reconnect_interval_seconds":10,"tick_interval_ms":1000},
+  "signal": {"min_confidence":80,"pending_min_confidence":75,"require_15m_alignment":true,"require_1h_alignment":false,"block_before_news_minutes":30,"block_after_news_minutes":15},
+  "risk": {"risk_percent":1.0,"max_consecutive_losses":2,"lock_minutes_after_loss":30,"daily_drawdown_percent":3.0,"demo_mode":true,"demo_min_trades":500,"demo_min_win_rate":55,"demo_max_drawdown_percent":15},
+  "levels": {"stop_loss_dollars":5.0,"take_profit_1_dollars":5.0,"take_profit_2_dollars":10.0},
+  "news": {"enabled":true,"update_interval_seconds":300},
+  "ui": {"theme":"dark","language":"fa","sound_alerts":true,"windows_notifications":true}
+}
