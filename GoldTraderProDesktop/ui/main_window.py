@@ -76,9 +76,8 @@ class MainWindow(QtWidgets.QMainWindow):
             df1h=self.engine.candles("H1",250);df4h=self.engine.candles("H4",200);dfd1=self.engine.candles("D1",250)
             self.analysis=analyze_market(self.df,df15,df1h,df4h,dfd1,price=tick['bid'])
             self.last_signal=build_signal(self.analysis,tick,self.settings)
-            if self.last_signal.get("action") in ("BUY","SELL"):
-                key=(self.last_signal["action"],round(self.last_signal["entry"],2),self.last_signal["issued_at"][:15])
-                if key!=self.last_logged_key:self.logger.append(self.last_signal);self.last_logged_key=key;self.refresh_history_table()
+            key=(self.last_signal.get("action"),round(self.last_signal.get("entry",0),2),self.last_signal["issued_at"][:15])
+            if key!=self.last_logged_key:self.logger.append(self.last_signal);self.last_logged_key=key;self.refresh_history_table()
             close=self.df.close.astype(float).to_numpy();self.chart.set_market_data(self.df,{p:ema(close,p) for p in (9,21,50,200)},self.last_signal)
             rv=rsi(close,14);self.rsi_plot.clear();self.rsi_plot.plot(list(range(len(rv))),rv,pen=pg.mkPen('#a371f7',width=1.4));self.rsi_plot.addLine(y=70,pen=pg.mkPen('#f85149',style=QtCore.Qt.PenStyle.DashLine));self.rsi_plot.addLine(y=30,pen=pg.mkPen('#3fb950',style=QtCore.Qt.PenStyle.DashLine))
             ml,ms,mh=macd(close);self.macd_plot.clear();self.macd_plot.plot(list(range(len(ml))),ml,pen=pg.mkPen('#58a6ff',width=1.2));self.macd_plot.plot(list(range(len(ms))),ms,pen=pg.mkPen('#e3b341',width=1.2));self.macd_plot.addItem(pg.BarGraphItem(x=list(range(len(mh))),height=[0 if v!=v else float(v) for v in mh],width=0.6,brush='#30363d'))
@@ -97,7 +96,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _signal_text(self,s):
         action=s.get("action","WAIT");fa={"BUY":"خرید ▲","SELL":"فروش ▼","WAIT":"انتظار ⏳"}.get(action,"انتظار ⏳")
         if action in ("BUY","SELL"):return f"{fa} | امتیاز {s.get('score',0)}%\nورود {s.get('entry',0):.2f} | SL {s.get('sl',0):.2f}\nTP1 {s.get('tp1',0):.2f} | TP2 {s.get('tp2',0):.2f}"
-        return f"{fa}\n{s.get('reason','شرایط ورود کامل نیست.')}"
+        return f"{fa} | امتیاز {s.get('score',0)}\n{s.get('reason','شرایط ورود کامل نیست.')}"
     def refresh_history_table(self):
         rows=self.logger.all();self.history.setRowCount(len(rows))
         for i,r in enumerate(reversed(rows)):
