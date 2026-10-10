@@ -11,7 +11,7 @@ from core.indicators import ema,rsi,macd,bollinger,stochastic
 from core.analyzer import analyze_market
 from core.signal_engine import build_signal
 from core.signal_logger import SignalLogger
-from core.news_engine import fetch_news
+from core.news_engine import fetch_news,blocking_news
 from core.risk_manager import RiskManager
 from core.alarm import alert
 from ui.styles import APP_STYLE
@@ -28,7 +28,9 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__();self.setWindowTitle("GoldTrader Pro | تحلیل و سیگنال طلا");self.resize(1480,920);self.setLayoutDirection(QtCore.Qt.LayoutDirection.RightToLeft);self.setStyleSheet(APP_STYLE)
         self.settings=json.loads((ROOT/"config"/"default.json").read_text(encoding="utf-8"));self.engine=MT5Engine(self.settings["mt5"]["symbol"]);self.logger=SignalLogger(ROOT);self.risk=RiskManager()
         self.tf="M5";self.last_signal=None;self.last_logged_key=None;self.df=pd.DataFrame();self.analysis={};self.tick_data=None;self.news_data={"status":"NO DATA","items":[]};self._build_ui()
-        self.timer=QtCore.QTimer(self);self.timer.timeout.connect(self.refresh_market);self.timer.start(2500);self.refresh_market();self.refresh_history_table()
+        self.timer=QtCore.QTimer(self);self.timer.timeout.connect(self.refresh_market);self.timer.start(2500)
+        self.news_timer=QtCore.QTimer(self);self.news_timer.timeout.connect(self.load_news);self.news_timer.start(int(self.settings.get('news',{}).get('update_interval_seconds',300))*1000)
+        self.refresh_market();self.refresh_history_table();QtCore.QTimer.singleShot(1200,self.load_news)
     def _build_ui(self):
         root=QtWidgets.QWidget();layout=QtWidgets.QVBoxLayout(root);layout.setContentsMargins(14,12,14,12);layout.setSpacing(10)
         header=QtWidgets.QHBoxLayout();title=QtWidgets.QLabel("GOLDTRADER PRO");title.setObjectName("Title");self.connection=QtWidgets.QLabel("● قطع از MT5");self.connection.setObjectName("Muted")
@@ -80,7 +82,7 @@ class MainWindow(QtWidgets.QMainWindow):
             df15=self.df if self.tf=="M15" else self.engine.candles("M15",250)
             df1h=self.engine.candles("H1",250);df4h=self.engine.candles("H4",200);dfd1=self.engine.candles("D1",250)
             self.analysis=analyze_market(self.df,df15,df1h,df4h,dfd1,price=tick['bid'])
-            self.last_signal=build_signal(self.analysis,tick,self.settings)
+            runtime_settings={**self.settings,"_news_blocking":self.news_data.get('blocking',[])};self.last_signal=build_signal(self.analysis,tick,runtime_settings)
             key=(self.last_signal.get("action"),round(self.last_signal.get("entry",0),2),self.last_signal["issued_at"][:15])
             if key!=self.last_logged_key:
                 self.logger.append(self.last_signal);self.last_logged_key=key;self.refresh_history_table()
@@ -120,9 +122,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.news_btn.setEnabled(False);self.news_status.setText("در حال بررسی RSS؛ در نبود دسترسی، NO DATA نمایش داده می‌شود.")
         self.worker=NewsWorker();self.worker.finished_data.connect(self.show_news);self.worker.start()
     def show_news(self,data):
-        self.news_btn.setEnabled(True);self.news_data=data;self.news_status.setText(f"وضعیت: {data['status']} | خبر مرتبط: {len(data['items'])} | زمان: {data['checked_at']}")
+        self.news_btn.setEnabled(True);self.news_data=data;self.news_data['blocking']=blocking_news(data.get('items',[]),int(self.settings.get('signal',{}).get('block_after_news_minutes',15)));self.news_status.setText(f"وضعیت: {data['status']} | خبر مرتبط: {len(data['items'])} | زمان: {data['checked_at']}")
         self.news_list.setRowCount(len(data["items"]))
         for i,item in enumerate(data["items"]):
             for j,val in enumerate([item["sentiment"],item["title"],item["source"],item["published"]]):self.news_list.setItem(i,j,QtWidgets.QTableWidgetItem(str(val)))
     def closeEvent(self,event):
-        self.timer.stop();self.engine.shutdown();event.accept()
+        self.timer.stop();self.news_timer.stop();self.engine.shutdown();event.accept()
