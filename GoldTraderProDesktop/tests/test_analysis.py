@@ -46,3 +46,13 @@ def test_signal_logger_tracks_price_touch(tmp_path):
     assert logger.track_price(2011) is True
     row=logger.all()[0]
     assert row["result"]=="TARGET_2_TOUCHED" and row["status"]=="CLOSED_BY_PRICE_TOUCH"
+
+def test_recent_high_impact_news_blocks_entry():
+    from datetime import datetime,timezone,timedelta
+    from core.news_engine import blocking_news
+    now=datetime.now(timezone.utc)
+    items=[{"title":"CPI inflation report","importance":"CRITICAL","gold_relevant":True,"published_at":(now-timedelta(minutes=5)).isoformat()}]
+    assert len(blocking_news(items,15,now))==1
+    analysis={"ready":True,"action":"BUY","score":99,"buy_score":99,"sell_score":0,"reasons":[]}
+    signal=build_signal(analysis,{"bid":2000,"ask":2000.2},{"_news_blocking":items})
+    assert signal["action"]=="WAIT" and signal["pending"]==[]
