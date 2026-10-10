@@ -51,6 +51,10 @@ class CandleChart(pg.PlotWidget):
             for side,color in (("support","#3fb950"),("resistance","#f85149")):
                 for level in levels.get(side,[]):
                     line=pg.InfiniteLine(angle=0,movable=False,pen=pg.mkPen(color,width=0.8,style=QtCore.Qt.PenStyle.DotLine));line.setValue(float(level["price"]));self.addItem(line);self.level_lines.append(line)
+            for zone in levels.get("order_blocks",[]):
+                color="#3fb950" if zone.get("side")=="BULLISH" else "#f85149"
+                for bound in ("low","high"):
+                    line=pg.InfiniteLine(angle=0,movable=False,pen=pg.mkPen(color,width=1.1,style=QtCore.Qt.PenStyle.DashDotLine));line.setValue(float(zone[bound]));self.addItem(line);self.level_lines.append(line)
         if signal and signal.get("action") in ("BUY","SELL"):
             for key,color in (("entry","#58a6ff"),("sl","#f85149"),("tp1","#3fb950"),("tp2","#2ea043")):
                 if signal.get(key) is not None:
