@@ -1,6 +1,7 @@
 PyQt6>=6.7
 pyqtgraph>=0.13.7
 numpy>=1.26
+pandas>=2.2
 MetaTrader5>=5.0.6231; platform_system == "Windows"
 feedparser>=6.0
 openpyxl>=3.1
