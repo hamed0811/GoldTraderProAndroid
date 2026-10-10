@@ -52,7 +52,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pending=QtWidgets.QTableWidget(0,8);self.pending.setHorizontalHeaderLabels(["نوع","سطح","فاصله $","اطمینان","SL","TP1","TP2","منابع"]);self.pending.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch);lower.addWidget(self._panel("سیگنال‌های پیش‌بینی",self.pending),2);m.addLayout(lower)
         self.tabs.addTab(self.monitor,"📊 مانیتور زنده")
         self.history_tab=QtWidgets.QWidget();hl=QtWidgets.QVBoxLayout(self.history_tab);stats=QtWidgets.QHBoxLayout()
-        self.history_stats=QtWidgets.QLabel("آمار بر اساس سیگنال‌های ثبت‌شده؛ نتیجه معامله خودکار ثبت نمی‌شود.")
+        self.history_stats=QtWidgets.QLabel("نتیجه بر اساس لمس قیمت به سطوح سیگنال پایش می‌شود؛ این سود/زیان معامله واقعی نیست.")
         self.export_btn=QtWidgets.QPushButton("خروجی Excel");self.export_btn.clicked.connect(self.export_excel);self.history_refresh=QtWidgets.QPushButton("به‌روزرسانی");self.history_refresh.clicked.connect(self.refresh_history_table)
         stats.addWidget(self.history_stats);stats.addStretch();stats.addWidget(self.history_refresh);stats.addWidget(self.export_btn);hl.addLayout(stats)
         self.history=QtWidgets.QTableWidget(0,8);self.history.setHorizontalHeaderLabels(["شناسه","زمان","نوع","ورود","امتیاز","حد ضرر","هدف ۱","وضعیت"]);self.history.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch);self.history.setAlternatingRowColors(True);hl.addWidget(self.history);self.tabs.addTab(self.history_tab,"📜 سابقه سیگنال‌ها")
@@ -70,7 +70,9 @@ class MainWindow(QtWidgets.QMainWindow):
             tick=self.engine.tick()
             if not tick:
                 self.connection.setText("● قطع از MT5");self.price.setText("NO DATA");self.statusBar().showMessage(self.engine.last_error or "داده واقعی دریافت نشد");return
-            self.tick_data=tick;self.connection.setText("● متصل به MT5");self.price.setText(f"Bid {tick['bid']:.2f}  |  Ask {tick['ask']:.2f}");self.spread.setText(f"اسپرد: {tick['spread']:.2f}")
+            self.tick_data=tick
+            if self.logger.track_price(tick['bid']):self.refresh_history_table()
+            self.connection.setText("● متصل به MT5");self.price.setText(f"Bid {tick['bid']:.2f}  |  Ask {tick['ask']:.2f}");self.spread.setText(f"اسپرد: {tick['spread']:.2f}")
             self.df=self.engine.candles(self.tf,500)
             if self.df.empty:self.statusBar().showMessage(self.engine.last_error or "کندل موجود نیست");return
             df15=self.df if self.tf=="M15" else self.engine.candles("M15",250)
@@ -104,7 +106,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def refresh_history_table(self):
         rows=self.logger.all();self.history.setRowCount(len(rows))
         for i,r in enumerate(reversed(rows)):
-            vals=[r.get("id",""),r.get("issued_at",""),r.get("action",""),r.get("entry","—"),r.get("score","—"),r.get("sl","—"),r.get("tp1","—"),r.get("status","تحلیلی")]
+            vals=[r.get("id",""),r.get("issued_at",""),r.get("action",""),r.get("entry","—"),r.get("score","—"),r.get("sl","—"),r.get("tp1","—"),r.get("result") or r.get("status","تحلیلی")]
             for j,val in enumerate(vals):self.history.setItem(i,j,QtWidgets.QTableWidgetItem(str(val)))
         self.history_stats.setText(f"کل ثبت‌ها: {len(rows)} | خرید: {sum(r.get('action')=='BUY' for r in rows)} | فروش: {sum(r.get('action')=='SELL' for r in rows)} | انتظار: {sum(r.get('action')=='WAIT' for r in rows)}")
     def export_excel(self):
