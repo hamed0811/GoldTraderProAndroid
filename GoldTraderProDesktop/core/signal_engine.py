@@ -23,6 +23,10 @@ def _pending_levels(analysis,tick,settings):
     return result
 def build_signal(analysis,tick,settings=None):
     settings=settings or {};levels_cfg=settings.get("levels",{});stamp=datetime.now(timezone.utc).isoformat()
+    news_block=settings.get('_news_blocking',[])
+    if news_block:
+        titles='؛ '.join(str(x.get('title','خبر مهم')) for x in news_block[:3])
+        return {"action":"WAIT","score":0,"reason":"فیلتر خبر پرریسک فعال است؛ تا پایان بازه احتیاط سیگنال ورود صادر نمی‌شود.","reasons":[titles],"pending":[],"issued_at":stamp}
     pending=_pending_levels(analysis,tick,settings)
     if not tick or not analysis.get("ready"):
         return {"action":"WAIT","score":0,"reason":"داده زنده یا تاریخچه کافی نیست؛ وضعیت NO DATA است.","reasons":analysis.get("reasons",[]),"pending":pending,"issued_at":stamp}
