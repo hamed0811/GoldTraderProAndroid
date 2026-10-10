@@ -7,7 +7,7 @@ import pandas as pd
 import pyqtgraph as pg
 from PyQt6 import QtCore,QtWidgets
 from core.mt5_engine import MT5Engine
-from core.indicators import ema,rsi,macd,bollinger,stochastic
+from core.indicators import ema,sma,dema,rsi,macd,bollinger,stochastic
 from core.analyzer import analyze_market
 from core.signal_engine import build_signal
 from core.signal_logger import SignalLogger
@@ -87,13 +87,14 @@ class MainWindow(QtWidgets.QMainWindow):
             if key!=self.last_logged_key:
                 self.logger.append(self.last_signal);self.last_logged_key=key;self.refresh_history_table()
                 if self.last_signal.get('action') in ('BUY','SELL'):alert(self.last_signal['action'],self.settings.get('ui',{}).get('sound_alerts',True))
-            close=self.df.close.astype(float).to_numpy();upper,mid,lower=bollinger(close);ema_lines={p:ema(close,p) for p in (9,21,50,200)};ema_lines['BB верх']=upper;ema_lines['BB низ']=lower
+            close=self.df.close.astype(float).to_numpy();upper,mid,lower=bollinger(close);ema_lines={p:ema(close,p) for p in (9,21,50,200)};ema_lines['SMA20']=sma(close,20);ema_lines['DEMA20']=dema(close,20);ema_lines['BB upper']=upper;ema_lines['BB lower']=lower
             self.chart.set_market_data(self.df,ema_lines,self.last_signal,self.analysis.get('levels'))
             rv=rsi(close,14);self.rsi_plot.clear();self.rsi_plot.plot(list(range(len(rv))),rv,pen=pg.mkPen('#a371f7',width=1.4));self.rsi_plot.addLine(y=70,pen=pg.mkPen('#f85149',style=QtCore.Qt.PenStyle.DashLine));self.rsi_plot.addLine(y=30,pen=pg.mkPen('#3fb950',style=QtCore.Qt.PenStyle.DashLine))
             ml,ms,mh=macd(close);self.macd_plot.clear();self.macd_plot.plot(list(range(len(ml))),ml,pen=pg.mkPen('#58a6ff',width=1.2));self.macd_plot.plot(list(range(len(ms))),ms,pen=pg.mkPen('#e3b341',width=1.2));self.macd_plot.addItem(pg.BarGraphItem(x=list(range(len(mh))),height=[0 if v!=v else float(v) for v in mh],width=0.6,brush='#30363d'))
             sk,sd=stochastic(self.df.high.astype(float).to_numpy(),self.df.low.astype(float).to_numpy(),close);self.stoch_plot.clear();self.stoch_plot.plot(list(range(len(sk))),sk,pen=pg.mkPen('#a371f7',width=1.2));self.stoch_plot.plot(list(range(len(sd))),sd,pen=pg.mkPen('#58a6ff',width=1.2));self.stoch_plot.addLine(y=80,pen=pg.mkPen('#f85149',style=QtCore.Qt.PenStyle.DashLine));self.stoch_plot.addLine(y=20,pen=pg.mkPen('#3fb950',style=QtCore.Qt.PenStyle.DashLine))
             self.signal_card.value_label.setText(self._signal_text(self.last_signal))
-            self.indicator_card.value_label.setText(f"امتیاز: {self.analysis.get('score','—')} | RSI: {self.analysis.get('rsi') if self.analysis.get('rsi') is not None else '—'} | ADX: {self.analysis.get('adx') if self.analysis.get('adx') is not None else '—'}")
+            vol_bias=self.analysis.get('volume_proxy',{}).get('bias','NO DATA');lct_score=self.analysis.get('lct',{}).get('score','—')
+            self.indicator_card.value_label.setText(f"امتیاز: {self.analysis.get('score','—')} | RSI: {self.analysis.get('rsi') if self.analysis.get('rsi') is not None else '—'} | ADX: {self.analysis.get('adx') if self.analysis.get('adx') is not None else '—'} | ATR: {self.analysis.get('atr') if self.analysis.get('atr') is not None else '—'} | LCT: {lct_score} | حجم: {vol_bias}")
             self.market_card.value_label.setText(f"نماد: {self.settings['mt5']['symbol']}\nتایم‌فریم: {self.tf} | کندل: {len(self.df)}")
             self.reasons.clear()
             for reason in self.last_signal.get("reasons",[]) if isinstance(self.last_signal.get("reasons",[]),list) else [self.last_signal.get("reason","")]:
