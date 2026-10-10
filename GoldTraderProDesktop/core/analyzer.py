@@ -8,5 +8,5 @@ def analyze_market(df_m5,df_m15=None,df_h1=None,df_h4=None,df_d1=None,price=None
     base=analyze_confluence(df_m5,df_m15,df_h1,df_h4,df_d1)
     if df_m5 is None or len(df_m5)<30:return base
     base["smc"]=analyze_smc(df_m5);base["lct"]=analyze_lct(df_m15 if df_m15 is not None and len(df_m15)>0 else df_m5)
-    base["volume_proxy"]=analyze_volume(df_m5);base["levels"]=find_levels(df_m5,price)
+    base["volume_proxy"]=analyze_volume(df_m5);base["levels"]=find_levels(df_m5,price);base["levels"]["order_blocks"]=base["smc"].get("order_blocks",[])
     return base
