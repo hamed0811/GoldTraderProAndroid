@@ -21,8 +21,8 @@ class CandleChart(pg.PlotWidget):
         self.getPlotItem().setLabel("right","قیمت");self.getPlotItem().setLabel("bottom","کندل")
         self.candles=CandlestickItem();self.addItem(self.candles);self.lines={}
         self.price_line=pg.InfiniteLine(angle=0,movable=False,pen=pg.mkPen("#ffd33d",width=1,style=QtCore.Qt.PenStyle.DashLine));self.addItem(self.price_line)
-        self.signal_lines=[];self.setMinimumHeight(350)
-    def set_market_data(self,df,emas=None,signal=None):
+        self.signal_lines=[];self.level_lines=[];self.setMinimumHeight(350)
+    def set_market_data(self,df,emas=None,signal=None,levels=None):
         if df is None or len(df)==0:return
         self.candles.setData([(i,float(r.open),float(r.close),float(r.low),float(r.high)) for i,r in enumerate(df.itertuples())])
         self.price_line.setValue(float(df.close.iloc[-1]))
@@ -35,6 +35,12 @@ class CandleChart(pg.PlotWidget):
                 self.addItem(line);self.lines[period]=line
         for item in self.signal_lines:self.removeItem(item)
         self.signal_lines=[]
+        for item in self.level_lines:self.removeItem(item)
+        self.level_lines=[]
+        if levels:
+            for side,color in (("support","#3fb950"),("resistance","#f85149")):
+                for level in levels.get(side,[]):
+                    line=pg.InfiniteLine(angle=0,movable=False,pen=pg.mkPen(color,width=0.8,style=QtCore.Qt.PenStyle.DotLine));line.setValue(float(level["price"]));self.addItem(line);self.level_lines.append(line)
         if signal and signal.get("action") in ("BUY","SELL"):
             for key,color in (("entry","#58a6ff"),("sl","#f85149"),("tp1","#3fb950"),("tp2","#2ea043")):
                 if signal.get(key) is not None:
