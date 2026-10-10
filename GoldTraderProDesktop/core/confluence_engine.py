@@ -19,6 +19,8 @@ def analyze(df_m5,df_m15=None,df_h1=None,df_h4=None,df_d1=None):
     else:layers["روند تایم‌فریم بالا"]="داده ناکافی/ناهمسو"
     if smc["bos"]=="BULLISH":buy+=15;layers["ساختار بازار"]=15;reasons.append("BOS صعودی تشخیص داده شد.")
     elif smc["bos"]=="BEARISH":sell+=15;layers["ساختار بازار"]=15;reasons.append("BOS نزولی تشخیص داده شد.")
+    elif smc["choch"]=="BULLISH":buy+=12;layers["ساختار بازار"]=12;reasons.append("CHoCH صعودی؛ تغییر احتمالی شخصیت روند.")
+    elif smc["choch"]=="BEARISH":sell+=12;layers["ساختار بازار"]=12;reasons.append("CHoCH نزولی؛ تغییر احتمالی شخصیت روند.")
     else:layers["ساختار بازار"]=0
     sscore=0
     if smc["sweep"]=="BULLISH":buy+=3;sscore+=3;reasons.append("Sweep صعودی نقدینگی مشاهده شد.")
