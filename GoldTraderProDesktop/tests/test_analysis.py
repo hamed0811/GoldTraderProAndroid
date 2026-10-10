@@ -31,3 +31,18 @@ def test_level_finder_returns_supported_shape():
 def test_smc_shape():
     result=analyze_smc(frame())
     assert "bos" in result and "sweep" in result and "fvg" in result
+
+def test_pending_signal_threshold_and_levels():
+    analysis={"ready":True,"action":"WAIT","score":70,"buy_score":70,"sell_score":45,"levels":{"support":[{"price":1990,"sources":["swing low","EMA50","round number","Fibonacci","HTF level"]}],"resistance":[]}}
+    signal=build_signal(analysis,{"bid":2000,"ask":2000.2},{"signal":{"pending_min_confidence":75}})
+    assert len(signal["pending"])==1
+    item=signal["pending"][0]
+    assert item["action"]=="BUY" and item["confidence"]>=75
+    assert item["sl"]==1985 and item["tp1"]==1995 and item["tp2"]==2000
+def test_signal_logger_tracks_price_touch(tmp_path):
+    from core.signal_logger import SignalLogger
+    logger=SignalLogger(tmp_path)
+    logger.append({"action":"BUY","entry":2000,"sl":1995,"tp1":2005,"tp2":2010,"issued_at":"2026-01-01T00:00:00Z"})
+    assert logger.track_price(2011) is True
+    row=logger.all()[0]
+    assert row["result"]=="TARGET_2_TOUCHED" and row["status"]=="CLOSED_BY_PRICE_TOUCH"
