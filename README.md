@@ -1,21 +1,16 @@
-# GoldTrader Pro Android
+# GoldTrader Pro — نسخه بازسازی‌شده دسکتاپ
 
-Native Android client for real XAUUSD monitoring and minute-level signal alerts.
+این شاخه بازسازی تمیز برنامه بر اساس پرامپت اصلی است: برنامه دسکتاپ ویندوز با رابط فارسی RTL، نمودار کندلی، ۹ تایم‌فریم، اندیکاتورها، تحلیل چندلایه، سیگنال فوری و پیش‌بینی‌شده، اخبار RSS، تاریخچه و خروجی Excel.
 
-## Safety boundary
-- **Order Entry is disabled.** This client does not place trades.
-- MT5 credentials and AI provider keys never belong in the Android app.
-- No synthetic price, PnL, confidence, candle or signal is generated when server data is missing.
-- Missing/stale data is shown as NO DATA / WAIT.
-- Smart Protection is OFF by default and remains server-side.
+## اجرای برنامه
+وارد پوشه GoldTraderProDesktop شوید و start_gui.bat را اجرا کنید. پیش‌نیازها در نخستین اجرا نصب می‌شوند. Python 3.11 x64 و MetaTrader 5 دسکتاپ لازم است.
 
-## Server
-HTTP: http://SERVER_IP:8765
-WebSocket: ws://SERVER_IP:8765/ws
-Reads /api/state and consumes /ws; polling fallback is every 5 seconds.
+## اصول این نسخه
+- بدون هوش مصنوعی و بدون تلگرام.
+- سیگنال‌محور است؛ هیچ سفارش معاملاتی ارسال نمی‌کند.
+- قیمت و کندل فقط از اتصال واقعی MT5 خوانده می‌شوند. در نبود داده، NO DATA نمایش داده می‌شود.
+- نتیجه سیگنال از لمس قیمت به سطوح ورود/SL/TP پایش می‌شود؛ این سود و زیان معامله واقعی نیست.
+- اجرای آزمایشی با حساب دمو توصیه می‌شود؛ سوددهی تضمین نمی‌شود.
 
-## Figma
-https://www.figma.com/design/P3Q4jDFPRfEqlZra6IyH7E
-
-## Build
-GitHub Actions builds a debug APK on push to android/** or manually via Actions → Android APK → Run workflow.
+## پروژه
+کد برنامه، راهنمای نصب و تست‌ها: GoldTraderProDesktop/
