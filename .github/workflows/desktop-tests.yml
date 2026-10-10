@@ -1,0 +1,20 @@
+name: GoldTraderPro Desktop Tests
+on:
+  push:
+    branches: ["rebuild/goldtraderpro-desktop-signal-only"]
+    paths: ["GoldTraderProDesktop/**", ".github/workflows/desktop-tests.yml"]
+  pull_request:
+    paths: ["GoldTraderProDesktop/**", ".github/workflows/desktop-tests.yml"]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: GoldTraderProDesktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install numpy pytest
+      - run: python -m pytest -q
