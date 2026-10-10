@@ -91,7 +91,7 @@ class MainWindow(QtWidgets.QMainWindow):
             key=(self.last_signal.get("action"),round(self.last_signal.get("entry",0),2),self.last_signal["issued_at"][:15])
             if key!=self.last_logged_key:
                 self.logger.append(self.last_signal);self.last_logged_key=key;self.refresh_history_table()
-                if self.last_signal.get('action') in ('BUY','SELL'):alert(self.last_signal['action'],self.settings.get('ui',{}).get('sound_alerts',True))
+                if self.last_signal.get('action') in ('BUY','SELL'):alert(self.last_signal['action'],self.settings.get('ui',{}).get('sound_alerts',True),self.settings.get('ui',{}).get('windows_notifications',True))
             close=self.df.close.astype(float).to_numpy();upper,mid,lower=bollinger(close);ema_lines={p:ema(close,p) for p in (9,21,50,200)};ema_lines['SMA20']=sma(close,20);ema_lines['DEMA20']=dema(close,20);ema_lines['BB upper']=upper;ema_lines['BB lower']=lower
             self.chart.set_market_data(self.df,ema_lines,self.last_signal,self.analysis.get('levels'))
             rv=rsi(close,14);self.rsi_plot.clear();self.rsi_plot.plot(list(range(len(rv))),rv,pen=pg.mkPen('#a371f7',width=1.4));self.rsi_plot.addLine(y=70,pen=pg.mkPen('#f85149',style=QtCore.Qt.PenStyle.DashLine));self.rsi_plot.addLine(y=30,pen=pg.mkPen('#3fb950',style=QtCore.Qt.PenStyle.DashLine))
