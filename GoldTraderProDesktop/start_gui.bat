@@ -1,19 +1,14 @@
 @echo off
+setlocal
 chcp 65001 >nul
 cd /d "%~dp0"
-if not exist ".venv\Scripts\python.exe" (
-  echo [1/2] Creating virtual environment...
-  py -3.11 -m venv .venv
-  if errorlevel 1 goto error
+
+if exist "%~dp0GoldTraderPro_AutoConsole.bat" (
+  call "%~dp0GoldTraderPro_AutoConsole.bat"
+  exit /b %ERRORLEVEL%
 )
-echo [2/2] Installing/checking requirements...
-".venv\Scripts\python.exe" -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
-if errorlevel 1 goto error
-".venv\Scripts\python.exe" main.py
-if errorlevel 1 goto error
-exit /b 0
-:error
-echo.
-echo ERROR: The application did not start. Read the error above.
+
+echo ERROR: GoldTraderPro_AutoConsole.bat was not found.
+echo Restore the companion console files or use the project README.
 pause
-exit /b 1
+exit /b 2

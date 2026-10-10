@@ -23,6 +23,17 @@ jobs:
       - name: Build desktop package
         shell: pwsh
         run: python -m PyInstaller --noconfirm --windowed --name GoldTraderPro --add-data "config;config" --collect-all pyqtgraph --hidden-import MetaTrader5 main.py
+      - name: Add automatic setup console to packaged app
+        shell: pwsh
+        run: |
+          $bundle = "dist/GoldTraderPro"
+          foreach ($file in @("GoldTraderPro_AutoConsole.bat", "GoldTraderPro_AutoConsole.ps1", "CONSOLE_README_FA.md")) {
+            if (-not (Test-Path -LiteralPath $file)) { throw "Required console file not found: $file" }
+            Copy-Item -LiteralPath $file -Destination $bundle -Force
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $bundle "GoldTraderPro.exe"))) {
+            throw "The packaged executable was not found in $bundle"
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: GoldTraderPro-Windows-Desktop
