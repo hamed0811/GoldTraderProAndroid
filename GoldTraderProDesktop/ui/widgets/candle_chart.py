@@ -1,5 +1,5 @@
 import pyqtgraph as pg
-from PyQt6 import QtCore, QtGui
+from PyQt6 import QtCore,QtGui
 class CandlestickItem(pg.GraphicsObject):
     def __init__(self,data=None):
         super().__init__();self.data=data or [];self.picture=QtGui.QPicture();self.generatePicture()
@@ -15,16 +15,26 @@ class CandlestickItem(pg.GraphicsObject):
     def paint(self,painter,option,widget):painter.drawPicture(0,0,self.picture)
     def boundingRect(self):return QtCore.QRectF(self.picture.boundingRect())
 class CandleChart(pg.PlotWidget):
+    crosshair_data=QtCore.pyqtSignal(str)
     def __init__(self,parent=None):
         super().__init__(parent=parent,background="#0d1117")
-        self.showGrid(x=True,y=True,alpha=0.18);self.showAxis("right");self.hideAxis("left")
+        self.frame=None;self.showGrid(x=True,y=True,alpha=0.18);self.showAxis("right");self.hideAxis("left")
         self.getPlotItem().setLabel("right","قیمت");self.getPlotItem().setLabel("bottom","کندل")
         self.candles=CandlestickItem();self.addItem(self.candles);self.lines={}
         self.price_line=pg.InfiniteLine(angle=0,movable=False,pen=pg.mkPen("#ffd33d",width=1,style=QtCore.Qt.PenStyle.DashLine));self.addItem(self.price_line)
+        self.vline=pg.InfiniteLine(angle=90,movable=False,pen=pg.mkPen("#8b949e",width=0.7));self.hline=pg.InfiniteLine(angle=0,movable=False,pen=pg.mkPen("#8b949e",width=0.7));self.addItem(self.vline,ignoreBounds=True);self.addItem(self.hline,ignoreBounds=True)
         self.signal_lines=[];self.level_lines=[];self.setMinimumHeight(350)
+        self.scene().sigMouseMoved.connect(self._mouse_moved)
+    def _mouse_moved(self,pos):
+        if not self.getPlotItem().sceneBoundingRect().contains(pos) or self.frame is None or self.frame.empty:return
+        point=self.getPlotItem().vb.mapSceneToView(pos);idx=int(round(point.x()))
+        if idx<0 or idx>=len(self.frame):return
+        row=self.frame.iloc[idx];self.vline.setValue(idx);self.hline.setValue(float(row["close"]))
+        stamp=str(row["time"]) if "time" in row else str(idx);volume=row.get("tick_volume",row.get("real_volume","—"))
+        self.crosshair_data.emit(f"{stamp} | O {row['open']:.2f} H {row['high']:.2f} L {row['low']:.2f} C {row['close']:.2f} | Vol {volume}")
     def set_market_data(self,df,emas=None,signal=None,levels=None):
         if df is None or len(df)==0:return
-        self.candles.setData([(i,float(r.open),float(r.close),float(r.low),float(r.high)) for i,r in enumerate(df.itertuples())])
+        self.frame=df.copy();self.candles.setData([(i,float(r.open),float(r.close),float(r.low),float(r.high)) for i,r in enumerate(df.itertuples())])
         self.price_line.setValue(float(df.close.iloc[-1]))
         for line in self.lines.values():self.removeItem(line)
         self.lines={}
